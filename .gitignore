@@ -1,0 +1,5 @@
+# .streamlit/secrets.toml
+
+[connections.supabase]
+SUPABASE_URL = "https://asopyqavtaihknofbufu.supabase.co"
+SUPABASE_KEY = "sb_publishable_KpAmy6gIlTXiC5HuZdCmrw_QVrvKWl9"

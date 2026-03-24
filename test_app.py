@@ -5,8 +5,11 @@ from st_supabase_connection import SupabaseConnection
 conn = st.connection("supabase",type=SupabaseConnection)
 
 # Perform query.
-rows = conn.query("*", table="Product", ttl="10m").execute()
+rows = conn.table("Product").select("*").execute()
 
-# Print results.
+# Print every product name.
+i=1
 for row in rows.data:
-    st.write(f"{row['product_name']}")
+    name = row["product_name"]
+    st.write(f"Product {i}: {name}")
+    i += 1

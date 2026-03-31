@@ -7,7 +7,7 @@ conn = st.connection("supabase",type=SupabaseConnection)
 # Perform query.
 rows = conn.table("Product").select("*").execute()
 
-Print every product name.
+# Print every product name.
 i=1
 for row in rows.data:
     name = row["product_name"]

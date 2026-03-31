@@ -8,9 +8,9 @@ conn = st.connection("supabase",type=SupabaseConnection)
 rows = conn.table("Product").select("*").execute()
 
 # Print every product name.
-i=1
-for row in rows.data:
-    name = row["product_name"]
-    st.write(f"Product {i}: {name}")
-    i += 1
+# i=1
+# for row in rows.data:
+#     name = row["product_name"]
+#     st.write(f"Product {i}: {name}")
+#     i += 1
 

@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 from supabase import create_client
 import pandas as pd
 from shapely import wkb
+from branca.element import Template, MacroElement
 
 #Add title
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")

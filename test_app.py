@@ -75,7 +75,7 @@ def generate_map(df):
     #Heatmap Layer
     # Using total_servings for the intensity weight
     heat_data = [[row['latitude'], row['longitude'], row['total_servings']] for _, row in df.iterrows()]
-    HeatMap(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
+    HeatMap(heat_data, radius=40, blur=15, max_zoom=13, gradient={0.2: 'blue', 0.5: 'yellow', 1.0: 'red').add_to(m)
 
     #Markers with Tooltips
     for _, row in df.iterrows():

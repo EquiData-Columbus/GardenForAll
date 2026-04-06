@@ -20,41 +20,51 @@ st.sidebar.caption("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%
 def get_live_data():
     # Pull pantry data
     pantry_res = supabase.table("Pantry").select("*").execute()
-    df = pd.DataFrame(pantry_res.data)
+    pantry_df = pd.DataFrame(pantry_res.data)
     
-    # Cleaning (Handles strings/commas from DB if not already numeric)
-    df['Weight (lbs)'] = 1 
-    
-    pantry_res = supabase.table("Pantry").select("*").execute()
-    df = pd.DataFrame(pantry_res.data)
-    
-    #Filter out rows where location is NULL
-    df = df.dropna(subset=['location'])
+    # Filter out rows where location is NULL
+    pantry_df = pantry_df.dropna(subset=['location'])
 
-    #Convert PostGIS Hex to Lat/Long
+    # Convert PostGIS Hex to Lat/Long
     def parse_location(hex_val):
         try:
-            #Load the point from the hex string
+            # Load the point from the hex string
             point = wkb.loads(hex_val, hex=True)
             return point.y, point.x  # y is lat, x is lon
         except:
             return None, None
 
-    df[['latitude', 'longitude']] = df['location'].apply(
+    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(
         lambda x: pd.Series(parse_location(x))
     )
 
-    #Remove any that failed to parse
-    df = df.dropna(subset=['latitude', 'longitude'])
-    
-    df['Weight (lbs)'] = 1 
-    return df
-    
-    # Merge data so Weights and Lat/Long are in one dataframe
-    # return pd.merge(df, loc_df, left_on='Pantry', right_on='name', how='inner')
-    return df
+    # Remove any that failed to parse
+    pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-merged_data = get_live_data()
+    # Pull product and shipment data for impact calculation
+    product_res = supabase.table("Product").select("*").execute()
+    product_df = pd.DataFrame(product_res.data)
+    
+    shipment_res = supabase.table("Food Shipments").select("*").execute()
+    shipment_df = pd.DataFrame(shipment_res.data)
+
+    # Extra key
+    # Merge data so Weights and Lat/Long are in one dataframe
+    merged = pd.merge(shipment_df, product_df, on="product_name", how="left")
+    
+    # Calculate impact (Using 'weight' from shipments if available, else just servings)
+    if 'weight' in merged.columns:
+        merged['total_servings'] = merged['weight'] * merged['servings_per_lb']
+    else:
+        merged['total_servings'] = merged['servings_per_lb']
+        
+    pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
+    final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="inner")
+    
+    return final_df, merged['total_servings'].sum()
+
+# Execute data pull
+merged_data, total_impact = get_live_data()
 
 #Generate the actual map
 def generate_map(df):
@@ -62,13 +72,14 @@ def generate_map(df):
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
 
     #Heatmap Layer
-    heat_data = [[row['latitude'], row['longitude'], row['Weight (lbs)']] for _, row in df.iterrows()]
+    # Using total_servings for the intensity weight
+    heat_data = [[row['latitude'], row['longitude'], row['total_servings']] for _, row in df.iterrows()]
     HeatMap(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
 
     #Markers with Tooltips
     for _, row in df.iterrows():
         # Using 'pantry_name' based on your Database Diagnostic
-        hover_text = f"<b>{row['pantry_name']}</b>: {row['Weight (lbs)']:,.0f} units"
+        hover_text = f"<b>{row['pantry_name']}</b>: {row['total_servings']:,.0f} servings"
         folium.Marker(
             location=[row['latitude'], row['longitude']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
@@ -81,10 +92,8 @@ def generate_map(df):
 st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 st.markdown("This map updates automatically as new data is entered into the database.")
 
-supabase.table("Product").select("*").execute()
-#Extra key
-total_impact = merged_data['servings_per_lb'].sum()
-st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} lbs")
+# Display the impact metric in the sidebar
+st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} servings")
 
 # Display the Map
 map_object = generate_map(merged_data)

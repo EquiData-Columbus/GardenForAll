@@ -4,6 +4,7 @@ from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from supabase import create_client
 import pandas as pd
+from shapely import wkb
 
 #Add title
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
@@ -22,18 +23,32 @@ def get_live_data():
     df = pd.DataFrame(pantry_res.data)
     
     # Cleaning (Handles strings/commas from DB if not already numeric)
-    # Note: Using 'display_weight' as a placeholder since 'Weight (lbs)' isn't in your DB yet
     df['Weight (lbs)'] = 1 
     
-    # Pull Coordinates
-    # We are using a manual mapping because the 'locations' table was not found in the DB
-    coords = {
-        "NAFP": [39.9612, -82.9988],
-        "GRIN": [40.0336, -83.0181],
-        "Broad St": [39.9625, -82.9150]
-    }
-    df['latitude'] = df['pantry_name'].map(lambda x: coords.get(x, [39.96, -82.99])[0])
-    df['longitude'] = df['pantry_name'].map(lambda x: coords.get(x, [39.96, -82.99])[1])
+    pantry_res = supabase.table("Pantry").select("*").execute()
+    df = pd.DataFrame(pantry_res.data)
+    
+    #Filter out rows where location is NULL
+    df = df.dropna(subset=['location'])
+
+    #Convert PostGIS Hex to Lat/Long
+    def parse_location(hex_val):
+        try:
+            #Load the point from the hex string
+            point = wkb.loads(hex_val, hex=True)
+            return point.y, point.x  # y is lat, x is lon
+        except:
+            return None, None
+
+    df[['latitude', 'longitude']] = df['location'].apply(
+        lambda x: pd.Series(parse_location(x))
+    )
+
+    #Remove any that failed to parse
+    df = df.dropna(subset=['latitude', 'longitude'])
+    
+    df['Weight (lbs)'] = 1 
+    return df
     
     # Merge data so Weights and Lat/Long are in one dataframe
     # return pd.merge(df, loc_df, left_on='Pantry', right_on='name', how='inner')
@@ -43,7 +58,7 @@ merged_data = get_live_data()
 
 #Generate the actual map
 def generate_map(df):
-    # Center on Columbus
+    #Center at Columbus
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
 
     # Apply custom "Olive/Green" CSS filter

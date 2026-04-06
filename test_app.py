@@ -85,6 +85,26 @@ def generate_map(df):
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
             tooltip=hover_text
         ).add_to(m)
+        
+    # Adding a Custom HTML Legend for the Heatmap
+    legend_html = """
+    {% macro html(this, kwargs) %}
+    <div style="
+        position: fixed; 
+        bottom: 50px; left: 50px; width: 160px; height: 100px; 
+        background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+        border-radius: 6px; padding: 10px;
+        ">
+        <b>Distribution Impact</b><br>
+        <i style="background:red; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> High Density<br>
+        <i style="background:orange; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Medium<br>
+        <i style="background:blue; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Low Density<br>
+    </div>
+    {% endmacro %}
+    """
+    legend = MacroElement()
+    legend._template = Template(legend_html)
+    m.get_root().add_child(legend)
     
     return m
 

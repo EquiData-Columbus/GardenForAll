@@ -7,7 +7,7 @@ import pandas as pd
 from shapely import wkb
 
 #Add title
-st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
+st.set_page_config(page_title="Garden For All | Live Heatmap 🌎", layout="wide")
 
 #Connect the supabase data using streamlit secrets key and url
 url = st.secrets["SUPABASE_URL"]
@@ -61,15 +61,6 @@ def generate_map(df):
     #Center at Columbus
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
 
-    # # Apply custom "Olive/Green" CSS filter
-    # map_filter = """
-    # <style>
-    #     .leaflet-tile-container { filter: sepia(100%) hue-rotate(35deg) saturate(150%) brightness(90%) contrast(90%); }
-    #     .leaflet-container { background: #9ab643 !important; }
-    # </style>
-    # """
-    # m.get_root().header.add_child(folium.Element(map_filter))
-
     #Heatmap Layer
     heat_data = [[row['latitude'], row['longitude'], row['Weight (lbs)']] for _, row in df.iterrows()]
     HeatMap(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
@@ -80,7 +71,7 @@ def generate_map(df):
         hover_text = f"<b>{row['pantry_name']}</b>: {row['Weight (lbs)']:,.0f} units"
         folium.Marker(
             location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkgreen', icon='shopping-cart', prefix='fa'),
+            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
             tooltip=hover_text
         ).add_to(m)
     

@@ -20,7 +20,7 @@ from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 from supabase import create_client
 import pandas as pd
-
+st.write("Columns in Database:", df.columns.tolist())
 #Add title
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 

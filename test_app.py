@@ -15,10 +15,11 @@
 #     i += 1
 
 import streamlit as st
-import pandas as pd
+import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_fol
 from supabase import database
+import pandas as pd
 
 #Add title
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
@@ -64,7 +65,7 @@ def generate_map(df):
 
     #Heatmap Layer
     heat_data = [[row['latitude'], row['longitude'], row['Weight (lbs)']] for _, row in df.iterrows()]
-    HeatMap(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
+    st_fol(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
 
     #Markers with Tooltips
     for _, row in df.iterrows():

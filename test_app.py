@@ -7,7 +7,7 @@ import pandas as pd
 from shapely import wkb
 
 #Add title
-st.set_page_config(page_title="Garden For All | Live Heatmap 🌎", layout="wide")
+st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 
 #Connect the supabase data using streamlit secrets key and url
 url = st.secrets["SUPABASE_URL"]
@@ -78,12 +78,13 @@ def generate_map(df):
     return m
 
 #Streamlit UI
-st.title("Live Distribution Heatmap")
+st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 st.markdown("This map updates automatically as new data is entered into the database.")
 
+supabase.table("Product").select("*").execute()
 #Extra key
-total_impact = merged_data['Weight (lbs)'].sum()
-st.sidebar.metric("2025 TOTAL IMPACT", f"{total_impact:,.1f} lbs")
+total_impact = merged_data['servings_per_lb'].sum()
+st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} lbs")
 
 # Display the Map
 map_object = generate_map(merged_data)

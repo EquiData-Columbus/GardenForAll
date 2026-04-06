@@ -25,8 +25,6 @@ import pandas as pd
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 
 #Connect the supabase data using streamlit secrets key and url
-SUPABASE_URL = "https://asopyqavtaihknofbufu.supabase.co"
-SUPABASE_KEY = "sb_publishable_KpAmy6gIlTXiC5HuZdCmrw_QVrvKWl9"
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)

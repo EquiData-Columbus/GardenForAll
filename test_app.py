@@ -36,8 +36,52 @@ def get_live_data():
     # Pull pantry data
     pantry_res = supabase.table("Pantry").select("*").execute()
     df = pd.DataFrame(pantry_res.data)
-    st.write("Columns in Database:", df.columns.tolist())
-    # #Cleaning (Handles strings/commas from DB if not already numeric)
+import streamlit as st
+import pandas as pd
+from supabase import create_client
+
+st.set_page_config(page_title="Debug Mode", layout="wide")
+
+# 1. Connection
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase = create_client(url, key)
+
+st.title("🔍 Database Diagnostic")
+
+# 2. Simple Fetch (No Cache, No Merge)
+try:
+    # Try to pull the Pantry table
+    res = supabase.table("Pantry").select("*").execute()
+    df = pd.DataFrame(res.data)
+    
+    if not df.empty:
+        st.success("✅ Successfully connected to 'Pantry' table!")
+        st.write("### These are your exact Column Names:")
+        st.write(df.columns.tolist())
+        
+        st.write("### First 3 rows of data:")
+        st.table(df.head(3))
+    else:
+        st.warning("The 'Pantry' table exists but appears to be empty.")
+
+except Exception as e:
+    st.error(f"❌ Error fetching 'Pantry' table: {e}")
+
+try:
+    # Try to pull the Locations table
+    loc_res = supabase.table("locations").select("*").execute()
+    loc_df = pd.DataFrame(loc_res.data)
+    
+    if not loc_df.empty:
+        st.success("✅ Successfully connected to 'locations' table!")
+        st.write("### Columns in Locations:")
+        st.write(loc_df.columns.tolist())
+    else:
+        st.warning("The 'locations' table exists but is empty.")
+        
+except Exception as e:
+    st.error(f"❌ Error fetching 'locations' table: {e}")    # #Cleaning (Handles strings/commas from DB if not already numeric)
     # df['Weight (lbs)'] = df['Weight (lbs)'].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce').fillna(0)
 
 #     #Pull Coordinates

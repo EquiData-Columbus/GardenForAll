@@ -6,3 +6,4 @@ folium
 streamlit-folium
 supabase
 shapely
+branca

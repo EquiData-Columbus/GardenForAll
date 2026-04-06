@@ -14,7 +14,7 @@ url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 
-st.sidebar.caption("Last checked: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"))
+st.sidebar.caption("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"))
 #This allows us to get the data but this only happens every ten minutes to stop sensitive keys
 @st.cache_data(ttl=600)
 def get_live_data():

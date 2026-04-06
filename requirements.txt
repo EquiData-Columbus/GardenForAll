@@ -1,2 +1,7 @@
 # requirements.txt
 st-supabase-connection
+streamlit
+pandas
+folium
+streamlit-folium
+supabase

@@ -17,8 +17,8 @@
 import streamlit as st
 import folium
 from folium.plugins import HeatMap
-from streamlit_folium import st_fol
-from supabase import database
+from streamlit_folium import st_folium
+from supabase import create_client
 import pandas as pd
 
 #Add title
@@ -27,7 +27,7 @@ st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 #Connect the supabase data using streamlit secrets key and url
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
-supabase = database(url, key)
+supabase = create_client(url, key)
 
 st.sidebar.caption("Last checked: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"))
 #This allows us to get the data but this only happens every ten minutes to stop sensitive keys
@@ -65,7 +65,7 @@ def generate_map(df):
 
     #Heatmap Layer
     heat_data = [[row['latitude'], row['longitude'], row['Weight (lbs)']] for _, row in df.iterrows()]
-    st_fol(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
+    HeatMap(heat_data, radius=40, blur=15, max_zoom=13).add_to(m)
 
     #Markers with Tooltips
     for _, row in df.iterrows():
@@ -88,7 +88,7 @@ st.sidebar.metric("2025 TOTAL IMPACT", f"{total_impact:,.1f} lbs")
 
 # Display the Map
 map_object = generate_map(merged_data)
-st_fol(map_object, width=1200, height=600, returned_objects=[])
+st_folium(map_object, width=1200, height=600, returned_objects=[])
 
 if st.button("Refresh Data Now"):
     st.cache_data.clear()

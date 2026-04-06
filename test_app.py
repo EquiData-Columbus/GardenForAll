@@ -34,7 +34,7 @@ st.sidebar.caption("Last checked: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%
 @st.cache_data(ttl=600)
 def get_live_data():
     # Pull pantry data
-    pantry_res = supabase.table("food_pantry").select("*").execute()
+    pantry_res = supabase.table("Pantry").select("*").execute()
     df = pd.DataFrame(pantry_res.data)
     
     #Cleaning (Handles strings/commas from DB if not already numeric)
@@ -45,7 +45,7 @@ def get_live_data():
     loc_df = pd.DataFrame(loc_res.data)
     
     # Merge data so Weights and Lat/Long are in one dataframe
-    return pd.merge(df, loc_df, left_on='Food Pantry', right_on='name', how='inner')
+    return pd.merge(df, loc_df, left_on='Pantry', right_on='name', how='inner')
 
 merged_data = get_live_data()
 

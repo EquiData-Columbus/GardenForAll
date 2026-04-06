@@ -59,8 +59,8 @@ def get_live_data():
         merged['total_servings'] = merged['servings_per_lb']
         
     pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
-    final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="inner")
-    
+    final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
+    final_df['total_servings'] = final_df['total_servings'].fillna(0)    
     return final_df, merged['total_servings'].sum()
 
 # Execute data pull

@@ -20,7 +20,8 @@ def get_live_data():
     p_df = pd.DataFrame(p_data)
     s_df = pd.DataFrame(s_data)
 
-    # 2. Fix Weights (Force the 4,798.1 lbs total)
+    # 2. Fix Weights (The Sum Fix)
+    # We force weights to numbers so the total 4,798.1 lbs can be calculated
     s_df['weight'] = pd.to_numeric(s_df['weight'], errors='coerce').fillna(0)
 
     # 3. Fix Coordinates
@@ -29,50 +30,48 @@ def get_live_data():
             pt = wkb.loads(val, hex=True)
             return pt.y, pt.x
         except: return None, None
-    
     p_df = p_df.dropna(subset=['location'])
     p_df[['lat', 'lon']] = p_df['location'].apply(lambda x: pd.Series(parse_loc(x)))
     p_df = p_df.dropna(subset=['lat', 'lon'])
 
-    # 4. HARD-CODE THE BRIDGE (The ID Error Fix)
-    # We find the ID column even if it's hidden or named differently
-    id_col = 'id' if 'id' in p_df.columns else p_df.columns[0] 
+    # 4. BRUTE FORCE THE BRIDGE
+    # We find the ID column regardless of case or index errors
+    id_col = next((col for col in p_df.columns if col.lower() == 'id'), p_df.columns[0])
     
-    # Create a translator: { "7": "Motherful", "12": "NNEMAP" }
+    # Create a string-based translator: { "7": "Motherful" }
     id_to_name = dict(zip(p_df[id_col].astype(str), p_df['pantry_name']))
 
-    # 5. TRANSLATE AND SUM (The 0.0 lbs Fix)
-    # We turn the numbers in shipments into names so the math actually groups together
-    s_df['clean_name'] = s_df['pantry_name'].astype(str).map(id_to_name).fillna(s_df['pantry_name'].astype(str))
+    # 5. AGGREGATE ALL SHIPMENTS
+    # We turn IDs into names and then sum every single row for that pantry
+    s_df['mapped_name'] = s_df['pantry_name'].astype(str).map(id_to_name).fillna(s_df['pantry_name'].astype(str))
     
-    summary = s_df.groupby('clean_name')['weight'].sum().reset_index()
+    summary = s_df.groupby('mapped_name')['weight'].sum().reset_index()
     summary.columns = ['pantry_name', 'weight']
 
-    # 6. Final Join for Map
+    # 6. Final Join (Left join keeps markers visible even at 0.0 lbs)
     map_data = pd.merge(p_df, summary, on='pantry_name', how='left')
     map_data['weight'] = map_data['weight'].fillna(0)
 
     return map_data, s_df['weight'].sum(), summary
 
 try:
-    final_df, total_impact, side_table = get_live_data()
+    final_df, total_lbs, side_table = get_live_data()
 
     # Sidebar Metric and Table
-    st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} lbs")
+    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
     st.sidebar.write("### Delivery Summary")
     st.sidebar.dataframe(side_table.sort_values(by='weight', ascending=False), hide_index=True)
 
     st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
-    # Center map on Columbus
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
     
-    # Heatmap Layer
+    # Heatmap (Using summed weights for density)
     heat_data = [[r['lat'], r['lon'], r['weight']] for _, r in final_df.iterrows() if r['weight'] > 0]
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Marker Pins with Correct Summed Totals
+    # Pin Markers (Shows the full summed total for each site)
     for _, r in final_df.iterrows():
         folium.Marker(
             location=[r['lat'], r['lon']],

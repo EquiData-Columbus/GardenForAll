@@ -14,58 +14,65 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
+    # 1. Fetch tables
     pantry_res = supabase.table("Pantry").select("*").execute()
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     
-    pantry_df = pd.DataFrame(pantry_res.data)
-    shipment_df = pd.DataFrame(shipment_res.data)
+    p_df = pd.DataFrame(pantry_res.data)
+    s_df = pd.DataFrame(shipment_res.data)
 
-    # 1. Process Coordinates
-    pantry_df = pantry_df.dropna(subset=['location'])
-    def parse_location(hex_val):
+    # 2. Force Weight to Numbers
+    s_df['weight'] = pd.to_numeric(s_df['weight'], errors='coerce').fillna(0)
+
+    # 3. COORDINATE BRUTE FORCE
+    p_df = p_df.dropna(subset=['location'])
+    def parse_loc(val):
         try:
-            point = wkb.loads(hex_val, hex=True)
-            return point.y, point.x
+            pt = wkb.loads(val, hex=True)
+            return pt.y, pt.x
         except: return None, None
-    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
-    pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
+    p_df[['lat', 'lon']] = p_df['location'].apply(lambda x: pd.Series(parse_loc(x)))
+    p_df = p_df.dropna(subset=['lat', 'lon'])
 
-    # 2. THE FIX: SUM BEFORE MERGING
-    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
+    # 4. BRUTE FORCE SUMMING (The Fix for tiny 2.7 lbs values)
+    # We link the tables by the ID number and then sum every single shipment
+    # This ensures the 4,798.1 lbs is actually used.
+    combined = pd.merge(s_df, p_df[['id', 'pantry_name']], left_on='pantry_name', right_on='id', suffixes=('_id', '_name'))
     
-    # This combines every 'Motherful' shipment into one total
-    summed_shipments = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
+    # Create the final summary table
+    summary = combined.groupby('pantry_name_name')['weight'].sum().reset_index()
+    summary.columns = ['pantry_name', 'weight']
 
-    # 3. Final Merge: Attach coordinates to the summed numbers
-    final_map_data = pd.merge(pantry_df, summed_shipments, on='pantry_name', how='left')
-    final_map_data['weight'] = final_map_data['weight'].fillna(0)
+    # 5. Final Merge for Map
+    map_df = pd.merge(p_df, summary, on='pantry_name', how='left')
+    map_df['weight'] = map_df['weight'].fillna(0)
 
-    return final_map_data, shipment_df['weight'].sum(), summed_shipments
+    return map_df, s_df['weight'].sum(), summary
 
 # --- UI EXECUTION ---
 try:
     map_data, total_lbs, summary_df = get_live_data()
 
-    # Sidebar: Cleaned to your specifications
+    # Sidebar: Total Impact and the requested table
     st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
     st.sidebar.write("### Delivery Summary")
-    st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
+    st.sidebar.dataframe(summary_df.sort_values(by='weight', ascending=False), hide_index=True)
 
     st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
     def generate_map(df):
         m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
         
-        # Heatmap Layer (Reflects the true summed density)
-        heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
+        # Heatmap (True Density)
+        heat_data = [[row['lat'], row['lon'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
         if heat_data:
             HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-        # Markers showing accurate totals
+        # Markers (Summed Totals)
         for _, row in df.iterrows():
             label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
             folium.Marker(
-                location=[row['latitude'], row['longitude']],
+                location=[row['lat'], row['lon']],
                 icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
                 tooltip=label
             ).add_to(m)
@@ -74,4 +81,4 @@ try:
     st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Data Error: {e}. Please check if the 'Pantry' table has 'id' and 'pantry_name' columns.")

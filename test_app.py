@@ -9,15 +9,13 @@ from branca.element import Template, MacroElement
 
 # Standard Setup
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
-
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
-supabase = create_client(url, key)
-
 st.sidebar.caption("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"))
 
 @st.cache_data(ttl=600)
 def get_live_data():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(url, key)
     # 1. Fetch data
     pantry_res = supabase.table("Pantry").select("*").execute()
     pantry_df = pd.DataFrame(pantry_res.data)
@@ -26,35 +24,55 @@ def get_live_data():
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     shipment_df = pd.DataFrame(shipment_res.data)
 
-    # 2. Process Coordinates
+    # 2. Normalize pantry_name — strip whitespace ONLY, preserve original casing
+    pantry_df['pantry_name'] = pantry_df['pantry_name'].astype(str).str.strip()
+    shipment_df['pantry_name'] = shipment_df['pantry_name'].astype(str).str.strip()
+
+    # Replace string "None"/"nan" that come from NULL values in Supabase
+    pantry_df['pantry_name'] = pantry_df['pantry_name'].replace({'None': pd.NA, 'nan': pd.NA, '': pd.NA})
+    shipment_df['pantry_name'] = shipment_df['pantry_name'].replace({'None': pd.NA, 'nan': pd.NA, '': pd.NA})
+
+    # 3. Process Coordinates
     pantry_df = pantry_df.dropna(subset=['location'])
+
     def parse_location(hex_val):
         try:
             point = wkb.loads(hex_val, hex=True)
             return point.y, point.x
-        except: return None, None
-    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
+        except:
+            return None, None
+
+    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(
+        lambda x: pd.Series(parse_location(x))
+    )
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # 3. Create the Master Calculation Table
-    # Merge shipments with products to get multipliers for EVERY row (even NULL pantries)
-    all_shipments = pd.merge(shipment_df, product_df[['product_name', 'servings_per_lb']], on="product_name", how="left")
-    
-    # Ensure math works for everything
+    # 4. Merge shipments with products
+    all_shipments = pd.merge(
+        shipment_df,
+        product_df[['product_name', 'servings_per_lb']],
+        on="product_name",
+        how="left"
+    )
+
     all_shipments['weight'] = pd.to_numeric(all_shipments['weight'], errors='coerce').fillna(0)
     all_shipments['servings_per_lb'] = pd.to_numeric(all_shipments['servings_per_lb'], errors='coerce').fillna(0)
     all_shipments['total_servings'] = all_shipments['weight'] * all_shipments['servings_per_lb']
 
-    # 4. Total Sidebar Impact (Sum of ALL rows, including NULLs)
+    # 5. Total sidebar impact — ALL rows including null pantry rows
     total_impact_all_time = all_shipments['total_servings'].sum()
 
-    # 5. Pantry-Specific Impact (Sum for the markers)
-    # We strip NULLs here so they don't create a "NaN" group
-    pantry_impact = all_shipments.dropna(subset=['pantry_name']).groupby('pantry_name')['total_servings'].sum().reset_index()
+    # 6. Pantry-specific impact — drop null pantry rows, then group
+    pantry_impact = (
+        all_shipments
+        .dropna(subset=['pantry_name'])
+        .groupby('pantry_name', as_index=False)['total_servings']
+        .sum()
+    )
 
-    # 6. Final Merge to Pins
+    # 7. Merge to pantry pins
     final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
-    final_df['total_servings'] = final_df['total_servings'].fillna(0)    
+    final_df['total_servings'] = final_df['total_servings'].fillna(0)
 
     return final_df, total_impact_all_time
     

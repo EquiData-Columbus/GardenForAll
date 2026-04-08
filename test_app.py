@@ -14,11 +14,11 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch Pantry table (This is our 'Dictionary')
+    # 1. Fetch Pantry table - This is our "Translator"
     pantry_res = supabase.table("Pantry").select("*").execute()
     pantry_df = pd.DataFrame(pantry_res.data)
 
-    # 2. Fetch Shipments table (The raw data)
+    # 2. Fetch Shipments table
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     shipment_df = pd.DataFrame(shipment_res.data)
 
@@ -32,62 +32,61 @@ def get_live_data():
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # --- THE RELIABLE MATCHING LOGIC ---
-    # Convert weight to numbers immediately
+    # --- THE NONE-KILLER: MANUAL TRANSLATION ---
+    # Convert weight to numbers
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # Supabase Foreign Keys often hide behind different column names in the API.
-    # We will look for common hidden names like 'pantry_id' or 'pantry_name_id'.
-    # If 'pantry_name' is returning None, we'll try to find the hidden ID column.
+    # We pull the real names from the Pantry table and match them to the Shipments
+    # even if Supabase is sending IDs or empty names.
+    # We match based on the 'pantry_name' column which acts as the shared ID.
+    combined_data = pd.merge(
+        shipment_df[['weight', 'pantry_name']], 
+        pantry_df[['pantry_name', 'latitude', 'longitude']], 
+        on='pantry_name', 
+        how='inner' # Only keep matches that actually have coordinates
+    )
+
+    # 3. AGGREGATE TOTALS
+    # This ensures "Motherful" shows the sum of all shipments, not just 2.7 lbs
+    summary_df = combined_data.groupby('pantry_name')['weight'].sum().reset_index()
     
-    # Let's create a 'clean' version of the shipments for matching
-    clean_shipments = shipment_df.copy()
-    
-    # This is the "Magic" step: 
-    # If the database is sending IDs instead of names, we bridge them here.
-    pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
-    
-    # If pantry_name is returning None, we fill it with the index match as a fallback
-    if clean_shipments['pantry_name'].isnull().all():
-        # This assumes the link matches the row order/ID of the Pantry table
-        clean_shipments['pantry_name'] = clean_shipments.index.map(pantry_map)
+    # 4. FINAL MAP DATA
+    # Re-attach coordinates to the summed weights
+    map_final = pd.merge(summary_df, pantry_df[['pantry_name', 'latitude', 'longitude']], on='pantry_name')
 
-    # 3. AGGREGATE
-    pantry_weights = clean_shipments.groupby('pantry_name')['weight'].sum().reset_index()
-    
-    # 4. FINAL MERGE
-    final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
-    final_df['weight'] = final_df['weight'].fillna(0)
+    return map_final, shipment_df['weight'].sum(), summary_df
 
-    return final_df, shipment_df['weight'].sum(), clean_shipments
+# --- EXECUTION ---
+try:
+    map_data, total_lbs, summary_table = get_live_data()
 
-# --- UI EXECUTION ---
-map_data, total_lbs, debug_df = get_live_data()
+    # Sidebar
+    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+    st.sidebar.write("### Delivery Summary")
+    # Clean table showing only Name and Total Weight
+    st.sidebar.dataframe(summary_table[['pantry_name', 'weight']], hide_index=True)
 
-# Sidebar Debugging
-st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
-st.sidebar.write("### Computer's Internal View")
-# We print ALL columns here so we can see where the ID is hiding
-st.sidebar.write(debug_df.head(10))
+    st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+    def generate_map(df):
+        m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
+        
+        # Heatmap
+        heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows()]
+        if heat_data:
+            HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-def generate_map(df):
-    m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
-    
-    # Heatmap Layer
-    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
-    if heat_data:
-        HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
+        # Markers
+        for _, row in df.iterrows():
+            label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs total"
+            folium.Marker(
+                location=[row['latitude'], row['longitude']],
+                icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
+                tooltip=label
+            ).add_to(m)
+        return m
 
-    # Markers Layer
-    for _, row in df.iterrows():
-        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
-        folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=label
-        ).add_to(m)
-    return m
+    st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
 
-st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+except Exception as e:
+    st.error(f"Waiting for valid data link... (Error: {e})")

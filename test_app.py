@@ -80,4 +80,52 @@ def generate_map(df):
     #Heatmap Layer
     # Using total_servings for the intensity weight
     heat_data = [[row['latitude'], row['longitude'], row['total_servings']] for _, row in df.iterrows()]
-    HeatMap(heat_data, radius=40, blur=15, max_zoom=
+    HeatMap(heat_data, radius=40, blur=15, max_zoom=13, gradient={0.2: 'blue', 0.5: 'yellow', 1.0: 'red'}).add_to(m)
+
+    #Markers with Tooltips
+    for _, row in df.iterrows():
+        # Using 'pantry_name' based on your Database Diagnostic
+        # Tooltip displays the specific serving count linked to this marker
+        hover_text = f"<b>{row['pantry_name']}</b>: {row['total_servings']:,.0f} servings"
+        folium.Marker(
+            location=[row['latitude'], row['longitude']],
+            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
+            tooltip=hover_text
+        ).add_to(m)
+        
+    # Adding a Custom HTML Legend for the Heatmap
+    legend_html = """
+    {% macro html(this, kwargs) %}
+    <div style="
+        position: fixed; 
+        bottom: 50px; left: 50px; width: 160px; height: 100px; 
+        background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+        border-radius: 6px; padding: 10px;
+        ">
+        <b>Distribution Impact</b><br>
+        <i style="background:red; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> High Density<br>
+        <i style="background:orange; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Medium<br>
+        <i style="background:blue; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Low Density<br>
+    </div>
+    {% endmacro %}
+    """
+    legend = MacroElement()
+    legend._template = Template(legend_html)
+    m.get_root().add_child(legend)
+    
+    return m
+
+#Streamlit UI
+st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+st.markdown("This map updates automatically as new data is entered into the database.")
+
+# Display the impact metric in the sidebar
+st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} servings")
+
+# Display the Map
+map_object = generate_map(merged_data)
+st_folium(map_object, width=1200, height=600, returned_objects=[])
+
+if st.button("Refresh Data Now"):
+    st.cache_data.clear()
+    st.rerun()

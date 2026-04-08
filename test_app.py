@@ -14,17 +14,18 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch tables
+    # 1. Fetch the raw data tables
     pantry_res = supabase.table("Pantry").select("*").execute()
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     
     p_df = pd.DataFrame(pantry_res.data)
     s_df = pd.DataFrame(shipment_res.data)
 
-    # 2. Force Weight to Numbers
+    # 2. Brute-force weight calculation
+    # We turn everything into a number so we can do math
     s_df['weight'] = pd.to_numeric(s_df['weight'], errors='coerce').fillna(0)
 
-    # 3. COORDINATE BRUTE FORCE
+    # 3. Coordinate Processing
     p_df = p_df.dropna(subset=['location'])
     def parse_loc(val):
         try:
@@ -34,16 +35,12 @@ def get_live_data():
     p_df[['lat', 'lon']] = p_df['location'].apply(lambda x: pd.Series(parse_loc(x)))
     p_df = p_df.dropna(subset=['lat', 'lon'])
 
-    # 4. BRUTE FORCE SUMMING (The Fix for tiny 2.7 lbs values)
-    # We link the tables by the ID number and then sum every single shipment
-    # This ensures the 4,798.1 lbs is actually used.
-    combined = pd.merge(s_df, p_df[['id', 'pantry_name']], left_on='pantry_name', right_on='id', suffixes=('_id', '_name'))
-    
-    # Create the final summary table
-    summary = combined.groupby('pantry_name_name')['weight'].sum().reset_index()
-    summary.columns = ['pantry_name', 'weight']
+    # 4. THE FIX: SUM EVERYTHING FIRST
+    # We add up every delivery for each location so Motherful shows a big number
+    summary = s_df.groupby('pantry_name')['weight'].sum().reset_index()
 
-    # 5. Final Merge for Map
+    # 5. Final Merge
+    # We join the big weights to the map coordinates
     map_df = pd.merge(p_df, summary, on='pantry_name', how='left')
     map_df['weight'] = map_df['weight'].fillna(0)
 
@@ -53,9 +50,10 @@ def get_live_data():
 try:
     map_data, total_lbs, summary_df = get_live_data()
 
-    # Sidebar: Total Impact and the requested table
+    # Sidebar: Total Impact and the clean table
     st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
     st.sidebar.write("### Delivery Summary")
+    # Sort by weight so the biggest contributors are at the top
     st.sidebar.dataframe(summary_df.sort_values(by='weight', ascending=False), hide_index=True)
 
     st.title("Garden For All | Live Distribution Heatmap 🌎📌")
@@ -63,12 +61,12 @@ try:
     def generate_map(df):
         m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
         
-        # Heatmap (True Density)
+        # Heatmap (Density based on the SUMMED weights)
         heat_data = [[row['lat'], row['lon'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
         if heat_data:
             HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-        # Markers (Summed Totals)
+        # Markers showing the accurate total weight for each site
         for _, row in df.iterrows():
             label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
             folium.Marker(
@@ -81,4 +79,4 @@ try:
     st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
 
 except Exception as e:
-    st.error(f"Data Error: {e}. Please check if the 'Pantry' table has 'id' and 'pantry_name' columns.")
+    st.error(f"App Error: {e}")

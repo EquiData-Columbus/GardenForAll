@@ -13,38 +13,48 @@ st.sidebar.caption("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%
 
 @st.cache_data(ttl=600)
 def get_live_data():
-    # ... [Keep your fetch logic the same] ...
+    # ... [Fetch your 3 tables here] ...
 
-    # 1. Normalize Names for Matching (Lowercasing prevents "Kale" vs "kale" errors)
-    pantry_df['match_key'] = pantry_df['pantry_name'].astype(str).str.lower().str.strip()
-    shipment_df['match_key'] = shipment_df['pantry_name'].astype(str).str.lower().str.strip()
-    
+    # 1. Prepare Shipments (The Math)
+    # Normalize product keys
     product_df['prod_key'] = product_df['product_name'].astype(str).str.lower().str.strip()
     shipment_df['prod_key'] = shipment_df['product_name'].astype(str).str.lower().str.strip()
 
-    # 2. Merge Shipments with Products
-    all_shipments = pd.merge(
-        shipment_df, 
-        product_df[['prod_key', 'servings_per_lb']], 
-        on="prod_key", 
-        how="left"
-    )
-
-    # 3. Secure the Math
-    all_shipments['weight'] = pd.to_numeric(all_shipments['weight'], errors='coerce').fillna(0)
+    # Join Shipments to Products
+    shipment_math = pd.merge(shipment_df, product_df[['prod_key', 'servings_per_lb']], on="prod_key", how="left")
     
-    # If a product isn't found, default to 1 serving so we at least see the weight on the map
-    all_shipments['servings_per_lb'] = pd.to_numeric(all_shipments['servings_per_lb'], errors='coerce').fillna(1)
-    all_shipments['total_servings'] = all_shipments['weight'] * all_shipments['servings_per_lb']
+    # Force numeric values
+    shipment_math['weight'] = pd.to_numeric(shipment_math['weight'], errors='coerce').fillna(0)
+    shipment_math['servings_per_lb'] = pd.to_numeric(shipment_math['servings_per_lb'], errors='coerce').fillna(1)
+    
+    # Calculate Total Servings per row
+    shipment_math['total_servings'] = shipment_math['weight'] * shipment_math['servings_per_lb']
 
-    # 4. Aggregate by the normalized match_key
-    pantry_impact = all_shipments.groupby('match_key')['total_servings'].sum().reset_index()
+    # 2. Sum by Pantry Name (The Bridge)
+    # Normalize pantry keys
+    shipment_math['match_key'] = shipment_math['pantry_name'].astype(str).str.lower().str.strip()
+    pantry_totals = shipment_math.groupby('match_key')['total_servings'].sum().reset_index()
 
-    # 5. Final Merge back to coordinates
-    final_df = pd.merge(pantry_df, pantry_impact, on="match_key", how="left")
+    # 3. Prepare Map Pins
+    pantry_df['match_key'] = pantry_df['pantry_name'].astype(str).str.lower().str.strip()
+    
+    # Merge totals into the pantry list
+    final_df = pd.merge(pantry_df, pantry_totals, on="match_key", how="left")
     final_df['total_servings'] = final_df['total_servings'].fillna(0)
 
-    return final_df, all_shipments['total_servings'].sum()
+    # 4. Handle Coordinates LAST
+    def parse_location(hex_val):
+        try:
+            point = wkb.loads(hex_val, hex=True)
+            return point.y, point.x
+        except: return None, None
+
+    final_df[['latitude', 'longitude']] = final_df['location'].apply(lambda x: pd.Series(parse_location(x)))
+    
+    # We keep rows even if they have 0 servings, but they MUST have coordinates
+    final_df = final_df.dropna(subset=['latitude', 'longitude'])
+
+    return final_df, shipment_math['total_servings'].sum()
     
 # Execute data pull
 merged_data, total_impact = get_live_data()

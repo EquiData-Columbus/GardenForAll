@@ -86,7 +86,7 @@ def generate_map(df):
             location=[row['latitude'], row['longitude']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
             tooltip=hover_text
-        ).add
+        ).add(m)
     
     return m
 

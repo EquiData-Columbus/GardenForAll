@@ -14,12 +14,11 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch Pantry table - This is our "Translator"
+    # 1. Fetch tables
     pantry_res = supabase.table("Pantry").select("*").execute()
-    pantry_df = pd.DataFrame(pantry_res.data)
-
-    # 2. Fetch Shipments table
     shipment_res = supabase.table("Food Shipments").select("*").execute()
+    
+    pantry_df = pd.DataFrame(pantry_res.data)
     shipment_df = pd.DataFrame(shipment_res.data)
 
     # --- COORDINATE PROCESSING ---
@@ -32,61 +31,51 @@ def get_live_data():
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # --- THE NONE-KILLER: MANUAL TRANSLATION ---
-    # Convert weight to numbers
+    # --- MATCHING LOGIC (RESTORED) ---
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # We pull the real names from the Pantry table and match them to the Shipments
-    # even if Supabase is sending IDs or empty names.
-    # We match based on the 'pantry_name' column which acts as the shared ID.
-    combined_data = pd.merge(
-        shipment_df[['weight', 'pantry_name']], 
-        pantry_df[['pantry_name', 'latitude', 'longitude']], 
-        on='pantry_name', 
-        how='inner' # Only keep matches that actually have coordinates
-    )
-
-    # 3. AGGREGATE TOTALS
-    # This ensures "Motherful" shows the sum of all shipments, not just 2.7 lbs
-    summary_df = combined_data.groupby('pantry_name')['weight'].sum().reset_index()
+    # Bridge IDs to Names if they are missing
+    pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
     
-    # 4. FINAL MAP DATA
-    # Re-attach coordinates to the summed weights
-    map_final = pd.merge(summary_df, pantry_df[['pantry_name', 'latitude', 'longitude']], on='pantry_name')
+    if shipment_df['pantry_name'].isnull().all():
+        shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
 
-    return map_final, shipment_df['weight'].sum(), summary_df
+    # 2. AGGREGATE: Sum weights by name so markers show the full total
+    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
+    
+    # 3. FINAL MERGE for the map
+    final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
+    final_df['weight'] = final_df['weight'].fillna(0)
 
-# --- EXECUTION ---
-try:
-    map_data, total_lbs, summary_table = get_live_data()
+    return final_df, shipment_df['weight'].sum(), pantry_weights
 
-    # Sidebar
-    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
-    st.sidebar.write("### Delivery Summary")
-    # Clean table showing only Name and Total Weight
-    st.sidebar.dataframe(summary_table[['pantry_name', 'weight']], hide_index=True)
+# --- UI EXECUTION ---
+map_data, total_lbs, summary_df = get_live_data()
 
-    st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+# Sidebar: Cleaned to show only Name and Weight
+st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+st.sidebar.write("### Delivery Summary")
+st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
-    def generate_map(df):
-        m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
-        
-        # Heatmap
-        heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows()]
-        if heat_data:
-            HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
+st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
-        # Markers
-        for _, row in df.iterrows():
-            label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs total"
-            folium.Marker(
-                location=[row['latitude'], row['longitude']],
-                icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-                tooltip=label
-            ).add_to(m)
-        return m
+def generate_map(df):
+    # Center on Columbus
+    m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
+    
+    # Heatmap Layer
+    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
+    if heat_data:
+        HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+    # Markers Layer
+    for _, row in df.iterrows():
+        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
+        folium.Marker(
+            location=[row['latitude'], row['longitude']],
+            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
+            tooltip=label
+        ).add_to(m)
+    return m
 
-except Exception as e:
-    st.error(f"Waiting for valid data link... (Error: {e})")
+st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])

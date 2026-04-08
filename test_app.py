@@ -54,14 +54,19 @@ def get_live_data():
     merged = pd.merge(shipment_df, product_df, on="product_name", how="left")
     
     # Calculate impact (Using 'weight' from shipments if available, else just servings)
-    if 'weight' in merged.columns:
-        merged['total_servings'] = merged['weight'] * merged['servings_per_lb']
-    else:
-        merged['total_servings'] = merged['servings_per_lb']
+    # Ensure columns are numeric to handle calculations
+    merged['weight'] = pd.to_numeric(merged['weight'], errors='coerce').fillna(0)
+    merged['servings_per_lb'] = pd.to_numeric(merged['servings_per_lb'], errors='coerce').fillna(0)
+    
+    merged['total_servings'] = merged['weight'] * merged['servings_per_lb']
         
+    # Group by pantry to get the total sum for each location
     pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
+
+    # Final merge: Link the calculated servings back to the coordinates
     final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
     final_df['total_servings'] = final_df['total_servings'].fillna(0)    
+
     return final_df, merged['total_servings'].sum()
 
 # Execute data pull
@@ -75,64 +80,4 @@ def generate_map(df):
     #Heatmap Layer
     # Using total_servings for the intensity weight
     heat_data = [[row['latitude'], row['longitude'], row['total_servings']] for _, row in df.iterrows()]
-    HeatMap(heat_data, radius=40, blur=15, max_zoom=13, gradient={0.2: 'blue', 0.5: 'yellow', 1.0: 'red'}).add_to(m)
-
-    #Markers with Tooltips
-    for _, row in df.iterrows():
-
-        # Inside get_live_data()
-        # 1. Merge shipments with product to get the servings multiplier
-        merged = pd.merge(shipment_df, product_df[['product_name', 'servings_per_lb']], on="product_name", how="left")
-
-        # 2. Calculate servings per shipment row
-        # Ensure weight is a float to avoid math errors with NULLs
-        merged['total_servings'] = merged['weight'].astype(float) * merged['servings_per_lb'].astype(float)
-
-        # 3. Group by pantry to get the total sum for each location
-        pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
-
-        # Using 'pantry_name' based on your Database Diagnostic
-        
-        hover_text = f"<b>{row['pantry_name']}</b>: {row['total_servings']:,.0f} servings"
-        folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=hover_text
-        ).add_to(m)
-        
-    # Adding a Custom HTML Legend for the Heatmap
-    legend_html = """
-    {% macro html(this, kwargs) %}
-    <div style="
-        position: fixed; 
-        bottom: 50px; left: 50px; width: 160px; height: 100px; 
-        background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
-        border-radius: 6px; padding: 10px;
-        ">
-        <b>Distribution Impact</b><br>
-        <i style="background:red; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> High Density<br>
-        <i style="background:orange; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Medium<br>
-        <i style="background:blue; width:10px; height:10px; float:left; margin-right:5px; margin-top:3px;"></i> Low Density<br>
-    </div>
-    {% endmacro %}
-    """
-    legend = MacroElement()
-    legend._template = Template(legend_html)
-    m.get_root().add_child(legend)
-    
-    return m
-
-#Streamlit UI
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
-st.markdown("This map updates automatically as new data is entered into the database.")
-
-# Display the impact metric in the sidebar
-st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} servings")
-
-# Display the Map
-map_object = generate_map(merged_data)
-st_folium(map_object, width=1200, height=600, returned_objects=[])
-
-if st.button("Refresh Data Now"):
-    st.cache_data.clear()
-    st.rerun()
+    HeatMap(heat_data, radius=40, blur=15, max_zoom=

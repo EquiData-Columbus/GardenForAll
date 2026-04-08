@@ -29,41 +29,42 @@ def get_live_data():
     # Convert PostGIS Hex to Lat/Long
     def parse_location(hex_val):
         try:
-            # Load the point from the hex string
             point = wkb.loads(hex_val, hex=True)
-            return point.y, point.x  # y is lat, x is lon
+            return point.y, point.x
         except:
             return None, None
 
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(
         lambda x: pd.Series(parse_location(x))
     )
-
-    # Remove any that failed to parse
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # Pull product and shipment data for impact calculation
+    # Pull product and shipment data
     product_res = supabase.table("Product").select("*").execute()
     product_df = pd.DataFrame(product_res.data)
     
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     shipment_df = pd.DataFrame(shipment_res.data)
 
-    # Extra key
-    # Merge data so Weights and Lat/Long are in one dataframe
+    # --- FIX START: Handle NULL pantry names ---
+    # We temporarily fill NULL pantry names so the groupby doesn't ignore them
+    shipment_df['pantry_name'] = shipment_df['pantry_name'].fillna("Unassigned")
+    # --- FIX END ---
+
+    # Merge shipments with product data
     merged = pd.merge(shipment_df, product_df, on="product_name", how="left")
     
-    # Calculate impact (Using 'weight' from shipments if available, else just servings)
-    # Ensure columns are numeric to handle calculations
+    # Ensure math columns are numbers
     merged['weight'] = pd.to_numeric(merged['weight'], errors='coerce').fillna(0)
     merged['servings_per_lb'] = pd.to_numeric(merged['servings_per_lb'], errors='coerce').fillna(0)
     
+    # Calculate impact
     merged['total_servings'] = merged['weight'] * merged['servings_per_lb']
         
-    # Group by pantry to get the total sum for each location
+    # Group by pantry (Now includes "Unassigned" instead of dropping NULLs)
     pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
 
-    # Final merge: Link the calculated servings back to the coordinates
+    # Final merge: Link calculated servings back to coordinates
     final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
     final_df['total_servings'] = final_df['total_servings'].fillna(0)    
 

@@ -21,49 +21,40 @@ def get_live_data():
     # 1. Fetch data
     pantry_res = supabase.table("Pantry").select("*").execute()
     pantry_df = pd.DataFrame(pantry_res.data)
-    
     product_res = supabase.table("Product").select("*").execute()
     product_df = pd.DataFrame(product_res.data)
-    
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     shipment_df = pd.DataFrame(shipment_res.data)
 
-    # 2. Map Coordinates Logic
+    # 2. Process Coordinates
     pantry_df = pantry_df.dropna(subset=['location'])
     def parse_location(hex_val):
         try:
             point = wkb.loads(hex_val, hex=True)
             return point.y, point.x
         except: return None, None
-
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # 3. Join Shipments with Product to get Serving Multipliers
-    merged = pd.merge(shipment_df, product_df[['product_name', 'servings_per_lb']], on="product_name", how="left")
+    # 3. Create the Master Calculation Table
+    # Merge shipments with products to get multipliers for EVERY row (even NULL pantries)
+    all_shipments = pd.merge(shipment_df, product_df[['product_name', 'servings_per_lb']], on="product_name", how="left")
     
-    # 4. THE FIX: Clean data BEFORE math
-    # Drop rows where pantry_name is NULL so they don't interfere with the per-marker sum
-    shipments_with_names = merged.dropna(subset=['pantry_name']).copy()
-    
-    # Ensure math columns are numeric
-    shipments_with_names['weight'] = pd.to_numeric(shipments_with_names['weight'], errors='coerce').fillna(0)
-    shipments_with_names['servings_per_lb'] = pd.to_numeric(shipments_with_names['servings_per_lb'], errors='coerce').fillna(0)
-    
-    # Calculate servings for the rows that have names
-    shipments_with_names['total_servings'] = shipments_with_names['weight'] * shipments_with_names['servings_per_lb']
-        
-    # 5. Group by Pantry (This creates your "Sum to Date" per location)
-    pantry_impact = shipments_with_names.groupby('pantry_name')['total_servings'].sum().reset_index()
+    # Ensure math works for everything
+    all_shipments['weight'] = pd.to_numeric(all_shipments['weight'], errors='coerce').fillna(0)
+    all_shipments['servings_per_lb'] = pd.to_numeric(all_shipments['servings_per_lb'], errors='coerce').fillna(0)
+    all_shipments['total_servings'] = all_shipments['weight'] * all_shipments['servings_per_lb']
 
-    # 6. Final Merge
-    # We use 'left' so all pins show up, but only those with shipments get the real numbers
+    # 4. Total Sidebar Impact (Sum of ALL rows, including NULLs)
+    total_impact_all_time = all_shipments['total_servings'].sum()
+
+    # 5. Pantry-Specific Impact (Sum for the markers)
+    # We strip NULLs here so they don't create a "NaN" group
+    pantry_impact = all_shipments.dropna(subset=['pantry_name']).groupby('pantry_name')['total_servings'].sum().reset_index()
+
+    # 6. Final Merge to Pins
     final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
     final_df['total_servings'] = final_df['total_servings'].fillna(0)    
-
-    # Note: For the sidebar total, we still use the 'merged' df (which includes the NULL rows)
-    # so your overall impact stays accurate (20,726.9).
-    total_impact_all_time = (merged['weight'].fillna(0) * merged['servings_per_lb'].fillna(0)).sum()
 
     return final_df, total_impact_all_time
     

@@ -79,7 +79,20 @@ def generate_map(df):
 
     #Markers with Tooltips
     for _, row in df.iterrows():
+
+        # Inside get_live_data()
+    # 1. Merge shipments with product to get the servings multiplier
+    merged = pd.merge(shipment_df, product_df[['product_name', 'servings_per_lb']], on="product_name", how="left")
+
+    # 2. Calculate servings per shipment row
+    # Ensure weight is a float to avoid math errors with NULLs
+    merged['total_servings'] = merged['weight'].astype(float) * merged['servings_per_lb'].astype(float)
+
+    # 3. Group by pantry to get the total sum for each location
+    pantry_impact = merged.groupby('pantry_name')['total_servings'].sum().reset_index()
+
         # Using 'pantry_name' based on your Database Diagnostic
+        
         hover_text = f"<b>{row['pantry_name']}</b>: {row['total_servings']:,.0f} servings"
         folium.Marker(
             location=[row['latitude'], row['longitude']],

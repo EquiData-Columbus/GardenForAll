@@ -6,7 +6,7 @@ from supabase import create_client
 import pandas as pd
 from shapely import wkb
 
-st.set_page_config(page_title="Garden For All | Final Map", layout="wide")
+st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 
 @st.cache_data(ttl=600)
 def get_live_data():
@@ -14,79 +14,68 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch raw data as simple objects
-    p_data = supabase.table("Pantry").select("*").execute().data
-    s_data = supabase.table("Food Shipments").select("*").execute().data
+    # 1. Fetch tables
+    pantry_res = supabase.table("Pantry").select("*").execute()
+    shipment_res = supabase.table("Food Shipments").select("*").execute()
     
-    p_df = pd.DataFrame(p_data)
-    s_df = pd.DataFrame(s_data)
+    pantry_df = pd.DataFrame(pantry_res.data)
+    shipment_df = pd.DataFrame(shipment_res.data)
 
-    # 2. Fix Weights & Coordinates
-    s_df['weight'] = pd.to_numeric(s_df['weight'], errors='coerce').fillna(0)
-    
-    def parse_loc(val):
+    # --- COORDINATE PROCESSING ---
+    pantry_df = pantry_df.dropna(subset=['location'])
+    def parse_location(hex_val):
         try:
-            pt = wkb.loads(val, hex=True)
-            return pt.y, pt.x
+            point = wkb.loads(hex_val, hex=True)
+            return point.y, point.x
         except: return None, None
-    p_df[['lat', 'lon']] = p_df['location'].apply(lambda x: pd.Series(parse_loc(x)))
-    p_df = p_df.dropna(subset=['lat', 'lon'])
+    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
+    pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # 3. MANUAL OVERRIDE: The "Inefficient" but Guaranteed Sum
-    # We iterate through every pantry and manually search the shipments
-    summed_results = []
+    # --- MATCHING LOGIC (RESTORED) ---
+    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # Identify the ID column dynamically to avoid the Sync Error
-    potential_id_cols = [c for c in p_df.columns if c.lower() in ['id', 'pantry_id', 'uuid']]
-    id_col = potential_id_cols[0] if potential_id_cols else p_df.columns[0]
-
-    for _, pantry in p_df.iterrows():
-        name = str(pantry['pantry_name']).strip().lower()
-        p_id = str(pantry[id_col]).strip().lower()
-        
-        # Manually add up every shipment that matches this name OR this ID
-        pantry_total = 0
-        for _, ship in s_df.iterrows():
-            ship_ref = str(ship['pantry_name']).strip().lower()
-            if ship_ref == name or ship_ref == p_id:
-                pantry_total += ship['weight']
-        
-        summed_results.append(pantry_total)
-
-    p_df['total_weight'] = summed_results
+    # Bridge IDs to Names if they are missing
+    pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
     
-    # Prepare Sidebar Data
-    sidebar_summary = p_df[p_df['total_weight'] > 0][['pantry_name', 'total_weight']]
-    sidebar_summary.columns = ['Pantry', 'Lbs Delivered']
+    if shipment_df['pantry_name'].isnull().all():
+        shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
 
-    return p_df, s_df['weight'].sum(), sidebar_summary
+    # 2. AGGREGATE: Sum weights by name so markers show the full total
+    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
+    
+    # 3. FINAL MERGE for the map
+    final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
+    final_df['weight'] = final_df['weight'].fillna(0)
 
-try:
-    final_df, total_lbs, side_table = get_live_data()
+    return final_df, shipment_df['weight'].sum(), pantry_weights
 
-    # Sidebar: Shows accurate multiple sums
-    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
-    st.sidebar.write("### Delivery Breakdown")
-    st.sidebar.table(side_table.sort_values(by='Lbs Delivered', ascending=False))
+# --- UI EXECUTION ---
+map_data, total_lbs, summary_df = get_live_data()
 
-    st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+# Sidebar: Cleaned to show only Name and Weight
+st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+st.sidebar.write("### Delivery Summary")
+st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
+st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+
+def generate_map(df):
+    # Center on Columbus
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
     
     # Heatmap Layer
-    heat_data = [[r['lat'], r['lon'], r['total_weight']] for _, r in final_df.iterrows() if r['total_weight'] > 0]
+    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Pins: Now showing correctly summed weights for each location
-    for _, r in final_df.iterrows():
+    # Markers Layer
+    for _, row in df.iterrows():
+        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
         folium.Marker(
-            location=[r['lat'], r['lon']],
+            location=[row['latitude'], row['longitude']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=f"<b>{r['pantry_name']}</b>: {r['total_weight']:,.1f} lbs"
+            tooltip=label
         ).add_to(m)
+    return m
 
-    st_folium(m, width=1200, height=600, returned_objects=[])
-
-except Exception as e:
-    st.error(f"Display Error: {e}. Checking database link columns...")
+st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])

@@ -15,12 +15,12 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # Fetch Data - We only strictly need Pantry and Food Shipments now
+    # Fetch Data - Pantry and Food Shipments
     pantry_df = pd.DataFrame(supabase.table("Pantry").select("*").execute().data)
     shipment_df = pd.DataFrame(supabase.table("Food Shipments").select("*").execute().data)
 
     # 2. Process Coordinates
-    pantry_df = pantry_df.dropna(subset=['location']) #
+    pantry_df = pantry_df.dropna(subset=['location'])
     def parse_location(hex_val):
         try:
             point = wkb.loads(hex_val, hex=True)
@@ -29,58 +29,53 @@ def get_live_data():
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # 3. Clean Keys for Matching
-    pantry_df['match_key'] = pantry_df['pantry_name'].astype(str).str.lower().str.strip() #
-    shipment_df['match_key'] = shipment_df['pantry_name'].astype(str).str.lower().str.strip() #
+    # 3. Standardize Names for the Merge
+    pantry_df['match_key'] = pantry_df['pantry_name'].astype(str).str.lower().str.strip()
+    shipment_df['match_key'] = shipment_df['pantry_name'].astype(str).str.lower().str.strip()
 
-    # 4. Calculation (Pounds Only)
-    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0) #
-    
-    # Total for Sidebar
+    # 4. Simple Weight Math (No Multipliers = No NaN)
+    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     total_lbs = shipment_df['weight'].sum()
 
-    # 5. Aggregation
+    # 5. Group by Pantry and Merge into Map Data
     pantry_weights = shipment_df.groupby('match_key')['weight'].sum().reset_index()
-    
-    # Merge weights into the coordinate data
     final_map_df = pd.merge(pantry_df, pantry_weights, on="match_key", how="left")
     final_map_df['weight'] = final_map_df['weight'].fillna(0)
 
-    return final_map_df, total_lbs, shipment_df
+    return final_map_df, total_lbs
 
-# Execute
-map_data, total_impact, raw_shipments = get_live_data()
+# Execute Pull
+map_data, total_impact_lbs = get_live_data()
 
-# 6. Sidebar UI
-st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} lbs") # Changed label to lbs
-st.sidebar.markdown("---")
-st.sidebar.subheader("Distribution Breakdown (lbs)")
+# 6. Sidebar (Clean, No Table)
+st.sidebar.metric("TOTAL IMPACT", f"{total_impact_lbs:,.1f} lbs")
+st.sidebar.info("Map markers show total pounds delivered to each location.")
 
-# Breakdown Table
-leaderboard = raw_shipments.groupby('pantry_name')['weight'].sum().reset_index()
-leaderboard = leaderboard[leaderboard['weight'] > 0].sort_values(by='weight', ascending=False)
-st.sidebar.table(leaderboard.set_index('pantry_name'))
-
-# 7. Main Map
+# 7. Main Map UI
 st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
 def generate_map(df):
+    # Center on Columbus
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
     
-    # Heatmap (Using weight for intensity)
+    # Heatmap Layer
     heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Markers (NAMES ONLY on hover)
+    # Markers with Name + Weight labels
     for _, row in df.iterrows():
+        # This puts the name and the weight back into the hover label
+        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
+        
         folium.Marker(
             location=[row['latitude'], row['longitude']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=f"<b>{row['pantry_name']}</b>" #
+            tooltip=label
         ).add_to(m)
     return m
 
+# Display
 st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
 
 if st.button("Refresh Data Now"):

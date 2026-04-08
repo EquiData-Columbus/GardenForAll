@@ -30,47 +30,48 @@ def get_live_data():
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # 2. Bridge IDs to Names (The Fix for Low Values)
+    # 2. THE FIX: SUM BEFORE MERGING
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # Use the 'id' column from Pantry to map the 'pantry_name' column in shipments
-    id_to_name = dict(zip(pantry_df['id'], pantry_df['pantry_name']))
-    shipment_df['display_name'] = shipment_df['pantry_name'].map(id_to_name)
+    # This combines every 'Motherful' shipment into one total
+    summed_shipments = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
 
-    # 3. Aggregate: Sum all shipments for each name
-    summary_df = shipment_df.groupby('display_name')['weight'].sum().reset_index()
-    summary_df.columns = ['pantry_name', 'weight']
+    # 3. Final Merge: Attach coordinates to the summed numbers
+    final_map_data = pd.merge(pantry_df, summed_shipments, on='pantry_name', how='left')
+    final_map_data['weight'] = final_map_data['weight'].fillna(0)
 
-    # 4. Final Merge for Map
-    final_df = pd.merge(pantry_df, summary_df, on='pantry_name', how='left')
-    final_df['weight'] = final_df['weight'].fillna(0)
-
-    return final_df, shipment_df['weight'].sum(), summary_df
+    return final_map_data, shipment_df['weight'].sum(), summed_shipments
 
 # --- UI EXECUTION ---
-map_data, total_lbs, summary_df = get_live_data()
+try:
+    map_data, total_lbs, summary_df = get_live_data()
 
-# Sidebar: Strictly Pantry and Weight
-st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
-st.sidebar.write("### Delivery Summary")
-st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
+    # Sidebar: Cleaned to your specifications
+    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+    st.sidebar.write("### Delivery Summary")
+    st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+    st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
-def generate_map(df):
-    m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
-    
-    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
-    if heat_data:
-        HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
+    def generate_map(df):
+        m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
+        
+        # Heatmap Layer (Reflects the true summed density)
+        heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
+        if heat_data:
+            HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    for _, row in df.iterrows():
-        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
-        folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=label
-        ).add_to(m)
-    return m
+        # Markers showing accurate totals
+        for _, row in df.iterrows():
+            label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
+            folium.Marker(
+                location=[row['latitude'], row['longitude']],
+                icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
+                tooltip=label
+            ).add_to(m)
+        return m
 
-st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+    st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+
+except Exception as e:
+    st.error(f"Error: {e}")

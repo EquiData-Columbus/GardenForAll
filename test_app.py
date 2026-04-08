@@ -68,8 +68,7 @@ def get_live_data():
     return final_df, shipment_math['total_servings'].sum()
 
 # 6. Run Data Pipeline
-merged_data, total_impact = get_live_data()https://github.com/EquiData-Columbus/GardenForAll/blob/main/test_app.py
-
+merged_data, total_impact = get_live_data()
 # 7. Map Construction
 def generate_map(df):
     # Center on Columbus, OH

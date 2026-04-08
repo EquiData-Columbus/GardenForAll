@@ -32,22 +32,17 @@ def get_live_data():
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
     # 3. ACCURATE SUMMING LOGIC
-    # First, convert weight to numbers
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # Identify the Link: Supabase usually stores the 'id' of the pantry in the 'pantry_name' column
-    # We create a dictionary where {ID: "Name"}
-    # Check if 'id' exists in pantry_df, if not use index as ID
-    id_col = 'id' if 'id' in pantry_df.columns else pantry_df.index
-    id_to_name = dict(zip(pantry_df[id_col], pantry_df['pantry_name']))
+    # We create a translator: {ID Number: "Pantry Name"}
+    # We use 'id' because that's what we saw in your internal view
+    name_map = dict(zip(pantry_df['id'], pantry_df['pantry_name']))
 
-    # Translate the IDs in shipment_df to actual names
-    # We apply the map to the column that currently contains the numbers/None
-    shipment_df['actual_name'] = shipment_df['pantry_name'].map(id_to_name)
+    # Link the shipments to names using that ID map
+    shipment_df['real_pantry_name'] = shipment_df['pantry_name'].map(name_map)
 
-    # 4. AGGREGATE: Sum every single shipment for each location
-    # This is what ensures 'Motherful' reflects all deliveries
-    summary_df = shipment_df.groupby('actual_name')['weight'].sum().reset_index()
+    # 4. AGGREGATE: This adds all Motherful weights together
+    summary_df = shipment_df.groupby('real_pantry_name')['weight'].sum().reset_index()
     summary_df.columns = ['pantry_name', 'weight']
 
     # 5. FINAL MERGE for the map
@@ -57,31 +52,36 @@ def get_live_data():
     return final_df, shipment_df['weight'].sum(), summary_df
 
 # --- UI EXECUTION ---
-map_data, total_lbs, summary_df = get_live_data()
+try:
+    map_data, total_lbs, summary_df = get_live_data()
 
-# Sidebar: Cleaned to show only Name and Weight
-st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
-st.sidebar.write("### Delivery Summary")
-st.sidebar.dataframe(summary_df.sort_values(by='weight', ascending=False), hide_index=True)
+    # Sidebar: Total Impact and the requested clean table
+    st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+    st.sidebar.write("### Delivery Summary")
+    st.sidebar.dataframe(summary_df.sort_values(by='weight', ascending=False), hide_index=True)
 
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+    st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
-def generate_map(df):
-    m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
-    
-    # Heatmap Layer (Reflects true summed density)
-    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
-    if heat_data:
-        HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
+    def generate_map(df):
+        m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
+        
+        # Heatmap Layer (density based on true weight)
+        heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
+        if heat_data:
+            HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Markers Layer with accurate totals
-    for _, row in df.iterrows():
-        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
-        folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=label
-        ).add_to(m)
-    return m
+        # Markers Layer showing accurate totals
+        for _, row in df.iterrows():
+            label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
+            folium.Marker(
+                location=[row['latitude'], row['longitude']],
+                icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
+                tooltip=label
+            ).add_to(m)
+        return m
 
-st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+    st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+
+except Exception as e:
+    st.error(f"Mapping Error: {e}")
+    st.write("Check if your 'Pantry' table has an 'id' column.")

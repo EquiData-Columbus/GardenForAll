@@ -87,7 +87,8 @@ def generate_map(df):
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
             tooltip=hover_text
         ).add
-return m
+    
+    return m
 
 # 8. Streamlit Interface
 st.title("Garden For All | Live Distribution Heatmap 🌎📌")

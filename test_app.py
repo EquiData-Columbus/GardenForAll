@@ -68,7 +68,7 @@ def get_live_data():
     return final_df, shipment_math['total_servings'].sum()
 
 # 6. Run Data Pipeline
-merged_data, total_impact = get_live_data()
+merged_data, total_impact = get_live_data()https://github.com/EquiData-Columbus/GardenForAll/blob/main/test_app.py
 
 # 7. Map Construction
 def generate_map(df):
@@ -88,3 +88,17 @@ def generate_map(df):
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
             tooltip=hover_text
         ).add
+return m
+
+# 8. Streamlit Interface
+st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+st.sidebar.metric("TOTAL IMPACT", f"{total_impact:,.1f} servings")
+
+# Display Map
+map_object = generate_map(merged_data)
+st_folium(map_object, width=1200, height=600, returned_objects=[])
+
+# Refresh functionality
+if st.button("Refresh Data Now"):
+    st.cache_data.clear()
+    st.rerun()

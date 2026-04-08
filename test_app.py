@@ -14,14 +14,11 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch raw data as simple lists
-    pantry_data = supabase.table("Pantry").select("*").execute().data
-    shipment_data = supabase.table("Food Shipments").select("*").execute().data
-    
-    p_df = pd.DataFrame(pantry_data)
-    s_df = pd.DataFrame(shipment_data)
+    # 1. Fetch raw data
+    p_df = pd.DataFrame(supabase.table("Pantry").select("*").execute().data)
+    s_df = pd.DataFrame(supabase.table("Food Shipments").select("*").execute().data)
 
-    # 2. Coordinate Processing
+    # 2. Fix Coordinates
     def parse_loc(val):
         try:
             pt = wkb.loads(val, hex=True)
@@ -30,61 +27,44 @@ def get_live_data():
     p_df[['lat', 'lon']] = p_df['location'].apply(lambda x: pd.Series(parse_loc(x)))
     p_df = p_df.dropna(subset=['lat', 'lon'])
 
-    # 3. THE RAW SUM OVERRIDE (Manual Loop)
-    # We create a dictionary to hold our totals
-    manual_totals = {}
+    # 3. THE BRIDGE: Map IDs to Names
+    # We turn the Pantry ID column into a dictionary so we can look up names
+    # Using .get() prevents the 'id' syntax error you saw earlier
+    id_to_name = dict(zip(p_df['id'].astype(str), p_df['pantry_name']))
 
-    for shipment in shipment_data:
-        # Get weight (force to float)
-        try:
-            w = float(shipment.get('weight', 0))
-        except:
-            w = 0
-            
-        # Get the pantry reference (could be a name or an ID)
-        ref = str(shipment.get('pantry_name', 'Unknown'))
-        
-        # Add to the total bucket
-        manual_totals[ref] = manual_totals.get(ref, 0) + w
-
-    # 4. BRUTE FORCE MATCHING
-    # We look at every pantry and try to find its weight in our buckets
-    final_weights = []
-    for _, row in p_df.iterrows():
-        p_name = str(row['pantry_name'])
-        p_id = str(row.get('id', ''))
-        
-        # Check if the weight was stored under the Name OR the ID
-        weight = manual_totals.get(p_name, 0) + manual_totals.get(p_id, 0)
-        final_weights.append(weight)
-
-    p_df['total_weight'] = final_weights
-
-    # Total for Sidebar
-    total_impact = sum(manual_totals.values())
+    # 4. SUM THE WEIGHTS (The 4,798.1 lbs Fix)
+    # We translate the shipments table IDs into Names, then SUM
+    s_df['weight'] = pd.to_numeric(s_df['weight'], errors='coerce').fillna(0)
+    s_df['mapped_name'] = s_df['pantry_name'].astype(str).map(id_to_name).fillna(s_df['pantry_name'])
     
-    return p_df, total_impact
+    summary = s_df.groupby('mapped_name')['weight'].sum().reset_index()
+    summary.columns = ['pantry_name', 'total_weight']
+
+    # 5. Final Join for Map
+    map_data = pd.merge(p_df, summary, on='pantry_name', how='left')
+    map_data['total_weight'] = map_data['total_weight'].fillna(0)
+
+    return map_data, s_df['weight'].sum(), summary
 
 try:
-    map_df, total_lbs = get_live_data()
+    final_df, total_lbs, side_table = get_live_data()
 
-    # Sidebar
+    # Sidebar: Total Impact
     st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
     st.sidebar.write("### Delivery Summary")
-    # Clean table for client
-    st.sidebar.table(map_df[map_df['total_weight'] > 0][['pantry_name', 'total_weight']].sort_values(by='total_weight', ascending=False))
+    st.sidebar.dataframe(side_table.sort_values(by='total_weight', ascending=False), hide_index=True)
 
     st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
     
-    # Heatmap
-    heat_data = [[r['lat'], r['lon'], r['total_weight']] for _, r in map_df.iterrows() if r['total_weight'] > 0]
+    # Heatmap Layer (Using the new Summed Weights)
+    heat_data = [[r['lat'], r['lon'], r['total_weight']] for _, r in final_df.iterrows() if r['total_weight'] > 0]
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Pins
-    for _, r in map_df.iterrows():
+    # Pin Markers showing TRUE totals
+    for _, r in final_df.iterrows():
         folium.Marker(
             location=[r['lat'], r['lon']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
@@ -94,4 +74,4 @@ try:
     st_folium(m, width=1200, height=600, returned_objects=[])
 
 except Exception as e:
-    st.error(f"Manual Sync Error: {e}")
+    st.error(f"Sync Error: {e}. Ensure 'id' and 'pantry_name' exist in your Pantry table.")

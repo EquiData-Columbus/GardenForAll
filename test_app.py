@@ -18,66 +18,66 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # 1. Fetch tables: Pull the 'Pantry' list and the 'Food Shipments' history
+    # Tables: Pull the 'Pantry' list and the 'Food Shipments' list
     pantry_res = supabase.table("Pantry").select("*").execute()
     shipment_res = supabase.table("Food Shipments").select("*").execute()
     
-    # Convert that raw database data into organized tables (like Excel sheets)
+    # Convert that raw database data into organized tables (like Excel sheets for easier reading)
     pantry_df = pd.DataFrame(pantry_res.data)
     shipment_df = pd.DataFrame(shipment_res.data)
 
-    # --- COORDINATE PROCESSING ---
-    # Throw out any pantries that don't have a location set so the map doesn't crash
+    # Discard any pantries that don't have a location (or with null) so the map doesn't crash
     pantry_df = pantry_df.dropna(subset=['location'])
     
-    # The database stores locations in a weird 'hex' code. This turns that code
+    # The database stores the locations in a hex code. This turns that code
     # into standard Latitude and Longitude numbers that a map can read.
     def parse_location(hex_val):
         try:
             point = wkb.loads(hex_val, hex=True)
-            return point.y, point.x # Return Latitude, Longitude
+            #returns the longitude and latitude
+            return point.y, point.x 
+        #returns nothing if the coordinate cannot be found
         except: return None, None
         
-    # Apply that conversion to every row in our pantry list
+    # Apply that conversion to every row in pantry list instead of a loop
     pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
     
-    # Remove anyone who still has missing coordinates after the conversion
+    # Remove any pantry that still has missing coordinates after the conversion (double-checking though they should not be in the code at this point)
     pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
 
-    # --- MATCHING LOGIC (RESTORED) ---
-    # Make sure the 'weight' column is treated as a number. If there's a typo, 
-    # treat it as 0 instead of breaking the math.
+    # Make sure the 'weight' column is treated as a number instead of pulled as a link. In case of a typo, 
+    # treat it as 0 so it remains compilable
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
     
-    # Sometimes the database uses ID numbers instead of names. This "Bridge" 
-    # creates a dictionary to translate those numbers back into real pantry names.
+    # If the database uses an ID number, this creates a dictionary to translate those numbers back into real pantry names
     pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
     
     # If the names are missing in the shipment logs, use that dictionary to fill them in
+    # This should take care of any misalignment in the name or null values
     if shipment_df['pantry_name'].isnull().all():
         shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
 
-    # 2. AGGREGATE: This is the important part. It groups every single delivery 
-    # for "Motherful" (for example) and adds the weights together so we see 
-    # the total impact, not just one delivery at a time.
+    # Group every delivery and adds the weights together so we see 
+    # the total impact in the table
     pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
     
-    # 3. FINAL MERGE: Combine the pantry coordinates with the calculated weights.
-    # We use a 'left' merge so that if a pantry has 0 deliveries, it still shows up.
+    # Combine the pantry coordinates with the calculated weights
+    # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.
     final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
-    final_df['weight'] = final_df['weight'].fillna(0) # Change 'Nothing' to '0'
+    # Fill in blanks with 0
+    final_df['weight'] = final_df['weight'].fillna(0) 
 
     return final_df, shipment_df['weight'].sum(), pantry_weights
 
-# --- UI EXECUTION (Building the actual website) ---
-# Run the logic above to get our clean data
+# Run the logic above
 map_data, total_lbs, summary_df = get_live_data()
 
-# Sidebar: Create the big "Impact" number at the top left
+# Sidebar: Create the big "Impact" title and number at the top left
 st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
 
 # Sidebar: Create a simple table showing how much each place got
 st.sidebar.write("### Delivery Summary")
+# Print a dataframe similar to what we made before
 st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
 # Main Title
@@ -88,7 +88,7 @@ def generate_map(df):
     # Start the map centered on Columbus, Ohio
     m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
     
-    # Heatmap Layer: This adds the "glow" based on how heavy the deliveries are
+    # Heatmap Layer: This adds the heat circles based on how dense the deliveries are
     heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
@@ -97,6 +97,7 @@ def generate_map(df):
     for _, row in df.iterrows():
         # This is what pops up when you hover over a pin
         label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
+        # Marker design
         folium.Marker(
             location=[row['latitude'], row['longitude']],
             icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),

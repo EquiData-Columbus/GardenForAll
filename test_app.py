@@ -13,68 +13,38 @@ st.sidebar.caption("Last updated: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%
 
 @st.cache_data(ttl=600)
 def get_live_data():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    supabase = create_client(url, key)
-    # 1. Fetch data
-    pantry_res = supabase.table("Pantry").select("*").execute()
-    pantry_df = pd.DataFrame(pantry_res.data)
-    product_res = supabase.table("Product").select("*").execute()
-    product_df = pd.DataFrame(product_res.data)
-    shipment_res = supabase.table("Food Shipments").select("*").execute()
-    shipment_df = pd.DataFrame(shipment_res.data)
+    # ... [Keep your fetch logic the same] ...
 
-    # 2. Normalize pantry_name — strip whitespace ONLY, preserve original casing
-    pantry_df['pantry_name'] = pantry_df['pantry_name'].astype(str).str.strip()
-    shipment_df['pantry_name'] = shipment_df['pantry_name'].astype(str).str.strip()
+    # 1. Normalize Names for Matching (Lowercasing prevents "Kale" vs "kale" errors)
+    pantry_df['match_key'] = pantry_df['pantry_name'].astype(str).str.lower().str.strip()
+    shipment_df['match_key'] = shipment_df['pantry_name'].astype(str).str.lower().str.strip()
+    
+    product_df['prod_key'] = product_df['product_name'].astype(str).str.lower().str.strip()
+    shipment_df['prod_key'] = shipment_df['product_name'].astype(str).str.lower().str.strip()
 
-    # Replace string "None"/"nan" that come from NULL values in Supabase
-    pantry_df['pantry_name'] = pantry_df['pantry_name'].replace({'None': pd.NA, 'nan': pd.NA, '': pd.NA})
-    shipment_df['pantry_name'] = shipment_df['pantry_name'].replace({'None': pd.NA, 'nan': pd.NA, '': pd.NA})
-
-    # 3. Process Coordinates
-    pantry_df = pantry_df.dropna(subset=['location'])
-
-    def parse_location(hex_val):
-        try:
-            point = wkb.loads(hex_val, hex=True)
-            return point.y, point.x
-        except:
-            return None, None
-
-    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(
-        lambda x: pd.Series(parse_location(x))
-    )
-    pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
-
-    # 4. Merge shipments with products
+    # 2. Merge Shipments with Products
     all_shipments = pd.merge(
-        shipment_df,
-        product_df[['product_name', 'servings_per_lb']],
-        on="product_name",
+        shipment_df, 
+        product_df[['prod_key', 'servings_per_lb']], 
+        on="prod_key", 
         how="left"
     )
 
+    # 3. Secure the Math
     all_shipments['weight'] = pd.to_numeric(all_shipments['weight'], errors='coerce').fillna(0)
-    all_shipments['servings_per_lb'] = pd.to_numeric(all_shipments['servings_per_lb'], errors='coerce').fillna(0)
+    
+    # If a product isn't found, default to 1 serving so we at least see the weight on the map
+    all_shipments['servings_per_lb'] = pd.to_numeric(all_shipments['servings_per_lb'], errors='coerce').fillna(1)
     all_shipments['total_servings'] = all_shipments['weight'] * all_shipments['servings_per_lb']
 
-    # 5. Total sidebar impact — ALL rows including null pantry rows
-    total_impact_all_time = all_shipments['total_servings'].sum()
+    # 4. Aggregate by the normalized match_key
+    pantry_impact = all_shipments.groupby('match_key')['total_servings'].sum().reset_index()
 
-    # 6. Pantry-specific impact — drop null pantry rows, then group
-    pantry_impact = (
-        all_shipments
-        .dropna(subset=['pantry_name'])
-        .groupby('pantry_name', as_index=False)['total_servings']
-        .sum()
-    )
-
-    # 7. Merge to pantry pins
-    final_df = pd.merge(pantry_df, pantry_impact, on="pantry_name", how="left")
+    # 5. Final Merge back to coordinates
+    final_df = pd.merge(pantry_df, pantry_impact, on="match_key", how="left")
     final_df['total_servings'] = final_df['total_servings'].fillna(0)
 
-    return final_df, total_impact_all_time
+    return final_df, all_shipments['total_servings'].sum()
     
 # Execute data pull
 merged_data, total_impact = get_live_data()

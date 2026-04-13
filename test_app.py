@@ -60,9 +60,6 @@ def get_live_data():
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
     pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
-
-    st.datafram(pantry_df[['pantry name']])
-    st.dataframe(shipment_df[['weight']])
     
     # Combine the pantry coordinates with the calculated weights
     # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.

@@ -61,6 +61,7 @@ def get_live_data():
     # the total impact in the table
     pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
 
+    st.datafram(pantry_df[['pantry name']])
     st.dataframe(shipment_df[['weight']])
     
     # Combine the pantry coordinates with the calculated weights

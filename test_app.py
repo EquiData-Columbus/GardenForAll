@@ -78,9 +78,9 @@ map_data, total_lbs, summary_df = get_live_data()
 st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
 
 # Sidebar: Create a simple table showing how much each place got
-st.sidebar.write("### Delivery Summary")
-# Print a dataframe similar to what we made before
-st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
+# st.sidebar.write("### Delivery Summary")
+# # Print a dataframe similar to what we made before
+# st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
 # Main Title
 st.title("Garden For All | Live Distribution Heatmap 🌎📌")

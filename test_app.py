@@ -48,9 +48,7 @@ def get_live_data():
     # Make sure the 'weight' column is treated as a number instead of pulled as a link. In case of a typo, 
     # treat it as 0 so it remains compilable
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
-
-    print(shipment_df['weight'])
-    
+ 
     # If the database uses an ID number, this creates a dictionary to translate those numbers back into real pantry names
     pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
     
@@ -62,6 +60,8 @@ def get_live_data():
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
     pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
+
+    st.dataframe(shipment_df[['weight']])
     
     # Combine the pantry coordinates with the calculated weights
     # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.

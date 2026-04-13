@@ -48,8 +48,6 @@ def get_live_data():
     # Make sure the 'weight' column is treated as a number instead of pulled as a link. In case of a typo, 
     # treat it as 0 so it remains compilable
     shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
-
-    print(shipment_df['weight'])
     
     # If the database uses an ID number, this creates a dictionary to translate those numbers back into real pantry names
     pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 

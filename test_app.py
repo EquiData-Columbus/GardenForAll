@@ -59,7 +59,7 @@ def get_live_data():
 
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
-    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum().reset_index()
+    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
 
     st.write(pantry_weights)
     

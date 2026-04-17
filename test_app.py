@@ -11,7 +11,7 @@ st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 
 # This "cache" function tells the app to remember the data for 10 minutes (600 seconds) 
 # so it doesn't have to keep bugging the database every time you click something.
-@st.cache_data(ttl=600
+@st.cache_data(ttl=600)
 def get_live_data():
     # Grab the secret "keys" to the database from the settings file
     url = st.secrets["SUPABASE_URL"]

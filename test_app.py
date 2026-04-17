@@ -59,9 +59,28 @@ def get_live_data():
 
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
-    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
+    # pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
 
-    st.write(pantry_weights)
+   # Create an empty dictionary to store totals
+    # Keys will be pantry names, values will be the sum of weights
+    m = {}
+
+    # Loop through every row in the shipment dataframe
+    for index, row in shipment_df.iterrows():
+        name = row['pantry_name']
+        weight = row['weight']
+
+        # If name isn't in the dictionary, add it
+        # Else add the new weight to the existing total.
+        if name not in m:
+            m[name] = weight
+        else:
+            m[name] += weight
+
+    # 4. Convert the dictionary back into a Series so the rest of your code works
+    # This creates a format that matches what your 'pantry_weights' variable expects
+    pantry_weights = pd.Series(m, name='weight')
+    pantry_weights.index.name = 'pantry_name'
     
     # Combine the pantry coordinates with the calculated weights
     # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.

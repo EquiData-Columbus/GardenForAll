@@ -59,7 +59,7 @@ def get_live_data():
 
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
-    # pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
+    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
 
    # Create an empty dictionary to store totals
     # Keys will be pantry names, values will be the sum of weights
@@ -97,9 +97,9 @@ map_data, total_lbs, summary_df = get_live_data()
 st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
 
 # Sidebar: Create a simple table showing how much each place got
-# st.sidebar.write("### Delivery Summary")
+st.sidebar.write("### Delivery Summary")
 # # Print a dataframe similar to what we made before
-# st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
+st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
 # Main Title
 st.title("Garden For All | Live Distribution Heatmap 🌎📌")

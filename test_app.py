@@ -54,8 +54,8 @@ def get_live_data():
     
     # If the names are missing in the shipment logs, use that dictionary to fill them in
     # This should take care of any misalignment in the name or null values
-    #if shipment_df['pantry_name'].isnull().all():
-    #    shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
+    if shipment_df['pantry_name'].isnull().all():
+        shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
 
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table

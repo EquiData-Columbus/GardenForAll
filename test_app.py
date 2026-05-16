@@ -6,125 +6,182 @@ from supabase import create_client
 import pandas as pd
 from shapely import wkb
 
-# Set up the web page layout to be wide and give it a title
-st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
+# ── Page config ────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Garden For All | Live Heatmap",
+    page_icon="🌱",
+    layout="wide",
+)
 
-# This "cache" function tells the app to remember the data for 10 minutes (600 seconds) 
-# so it doesn't have to keep bugging the database every time you click something.
+# ── Custom CSS ─────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'DM Sans', sans-serif;
+    }
+    h1, h2, h3 {
+        font-family: 'DM Serif Display', serif !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-family: 'DM Serif Display', serif;
+        font-size: 2.2rem !important;
+        color: #2d6a4f;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #888;
+    }
+    section[data-testid="stSidebar"] {
+        background-color: #f0f4f0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Data fetching ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def get_live_data():
-    # Grab the secret "keys" to the database from the settings file
+    """
+    Fetch pantry locations and food shipment data from Supabase.
+
+    Schema assumptions:
+      Pantry        → pantry_name (PK), location (PostGIS point as WKB hex)
+      Food Shipments → pantry_name (FK → Pantry.pantry_name), weight (numeric)
+    """
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # Tables: Pull the 'Pantry' list and the 'Food Shipments' list
-    pantry_res = supabase.table("Pantry").select("*").execute()
-    shipment_res = supabase.table("Food Shipments").select("*").execute()
-    
-    # Convert that raw database data into organized tables (like Excel sheets for easier reading)
-    pantry_df = pd.DataFrame(pantry_res.data)
-    shipment_df = pd.DataFrame(shipment_res.data)
+    # ── Fetch raw tables ───────────────────────────────────────────────────────
+    pantry_df    = pd.DataFrame(supabase.table("Pantry").select("*").execute().data)
+    shipment_df  = pd.DataFrame(supabase.table("Food Shipments").select("*").execute().data)
 
-    # Discard any pantries that don't have a location (or with null) so the map doesn't crash
-    pantry_df = pantry_df.dropna(subset=['location'])
-    
-    # The database stores the locations in a hex code. This turns that code
-    # into standard Latitude and Longitude numbers that a map can read.
-    def parse_location(hex_val):
+    # ── Parse PostGIS WKB hex → (latitude, longitude) ─────────────────────────
+    def wkb_to_latlon(hex_val):
+        """Return (lat, lon) from a PostGIS WKB hex string, or (None, None)."""
         try:
             point = wkb.loads(hex_val, hex=True)
-            #returns the longitude and latitude
-            return point.y, point.x 
-        #returns nothing if the coordinate cannot be found
-        except: return None, None
-        
-    # Apply that conversion to every row in pantry list instead of a loop
-    pantry_df[['latitude', 'longitude']] = pantry_df['location'].apply(lambda x: pd.Series(parse_location(x)))
-    
-    # Remove any pantry that still has missing coordinates after the conversion (double-checking though they should not be in the code at this point)
-    pantry_df = pantry_df.dropna(subset=['latitude', 'longitude'])
+            return point.y, point.x   # PostGIS stores (lon, lat) → flip
+        except Exception:
+            return None, None
 
-    # Make sure the 'weight' column is treated as a number instead of pulled as a link. In case of a typo, 
-    # treat it as 0 so it remains compilable
-    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
-    
-    # If the database uses an ID number, this creates a dictionary to translate those numbers back into real pantry names
-    pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
-    
-    # If the names are missing in the shipment logs, use that dictionary to fill them in
-    # This should take care of any misalignment in the name or null values
-    if shipment_df['pantry_name'].isnull().all():
-        shipment_df['pantry_name'] = shipment_df.index.map(pantry_map)
+    pantry_df[["latitude", "longitude"]] = (
+        pantry_df["location"]
+        .apply(lambda x: pd.Series(wkb_to_latlon(x)))
+    )
 
-    # Group every delivery and adds the weights together so we see 
-    # the total impact in the table
-    pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
+    # Drop pantries with no parseable location
+    pantry_df = pantry_df.dropna(subset=["latitude", "longitude"])
 
-   # Create an empty dictionary to store totals
-    # Keys will be pantry names, values will be the sum of weights
-    m = {}
+    # ── Coerce shipment weights to numeric ─────────────────────────────────────
+    shipment_df["weight"] = (
+        pd.to_numeric(shipment_df["weight"], errors="coerce").fillna(0)
+    )
 
-    # Loop through every row in the shipment dataframe
-    for index, row in shipment_df.iterrows():
-        name = row['pantry_name']
-        weight = row['weight']
+    # ── Aggregate total weight delivered per pantry ────────────────────────────
+    # pantry_name in Food Shipments is a FK to Pantry.pantry_name, so we can
+    # group directly — no index-based mapping needed.
+    pantry_weights = (
+        shipment_df
+        .groupby("pantry_name", as_index=False)["weight"]
+        .sum()
+        .rename(columns={"weight": "total_weight_lbs"})
+    )
 
-        # If name isn't in the dictionary, add it
-        # Else add the new weight to the existing total.
-        if name not in m:
-            m[name] = weight
-        else:
-            m[name] += weight
+    # ── Join weights onto pantry coordinates ───────────────────────────────────
+    # Left join so pantries with zero deliveries still appear on the map.
+    final_df = pantry_df.merge(pantry_weights, on="pantry_name", how="left")
+    final_df["total_weight_lbs"] = final_df["total_weight_lbs"].fillna(0)
 
-    # 4. Convert the dictionary back into a Series so the rest of your code works
-    # This creates a format that matches what your 'pantry_weights' variable expects
-    pantry_weights = pd.Series(m, name='weight')
-    pantry_weights.index.name = 'pantry_name'
-    
-    # Combine the pantry coordinates with the calculated weights
-    # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.
-    final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
-    # Fill in blanks with 0
-    final_df['weight'] = final_df['weight'].fillna(0) 
+    # ── Totals ─────────────────────────────────────────────────────────────────
+    total_lbs    = shipment_df["weight"].sum()
+    total_stops  = (pantry_weights["total_weight_lbs"] > 0).sum()
 
-    return final_df, shipment_df['weight'].sum(), pantry_weights
+    return final_df, total_lbs, total_stops, pantry_weights
 
-# Run the logic above
-map_data, total_lbs, summary_df = get_live_data()
 
-# Sidebar: Create the big "Impact" title and number at the top left
-st.sidebar.metric("TOTAL IMPACT", f"{total_lbs:,.1f} lbs")
+# ── Load data ──────────────────────────────────────────────────────────────────
+try:
+    map_data, total_lbs, total_stops, summary_df = get_live_data()
+except Exception as e:
+    st.error(f"❌ Could not load data from Supabase: {e}")
+    st.info("Make sure SUPABASE_URL and SUPABASE_KEY are set in your Streamlit secrets.")
+    st.stop()
 
-# Sidebar: Create a simple table showing how much each place got
-st.sidebar.write("### Delivery Summary")
-# # Print a dataframe similar to what we made before
-st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
-# Main Title
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 🌱 Garden For All")
+    st.divider()
 
-# The function that actually draws the map
-def generate_map(df):
-    # Start the map centered on Columbus, Ohio
-    m = folium.Map(location=[39.9612, -82.9988], zoom_start=11, tiles="cartodbpositron")
-    
-    # Heatmap Layer: This adds the heat circles based on how dense the deliveries are
-    heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
+    col1, col2 = st.columns(2)
+    col1.metric("Total Impact", f"{total_lbs:,.1f} lbs")
+    col2.metric("Active Pantries", int(total_stops))
+
+    st.divider()
+    st.markdown("### Delivery Summary")
+
+    display_df = (
+        summary_df
+        .rename(columns={"pantry_name": "Pantry", "total_weight_lbs": "lbs Delivered"})
+        .sort_values("lbs Delivered", ascending=False)
+        .reset_index(drop=True)
+    )
+    display_df["lbs Delivered"] = display_df["lbs Delivered"].map("{:,.1f}".format)
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.divider()
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+
+
+# ── Main page ──────────────────────────────────────────────────────────────────
+st.title("Garden For All — Live Distribution Heatmap")
+st.caption("Real-time food shipment data across Columbus, Ohio")
+
+
+# ── Map generation ─────────────────────────────────────────────────────────────
+def generate_map(df: pd.DataFrame) -> folium.Map:
+    """Build a Folium map with a heatmap layer and pantry markers."""
+    m = folium.Map(
+        location=[39.9612, -82.9988],   # Columbus, OH
+        zoom_start=11,
+        tiles="cartodbpositron",
+    )
+
+    # Heatmap — only include pantries that actually received deliveries
+    heat_rows = df[df["total_weight_lbs"] > 0]
+    heat_data = heat_rows[["latitude", "longitude", "total_weight_lbs"]].values.tolist()
+
     if heat_data:
         HeatMap(heat_data, radius=35, blur=15, max_zoom=13).add_to(m)
 
-    # Markers Layer: Put a blue shopping cart pin at every location
+    # One marker per pantry (including those with zero deliveries)
     for _, row in df.iterrows():
-        # This is what pops up when you hover over a pin
-        label = f"<b>{row['pantry_name']}</b>: {row['weight']:,.1f} lbs"
-        # Marker design
+        weight    = row["total_weight_lbs"]
+        icon_color = "darkblue" if weight > 0 else "gray"
+        tooltip   = (
+            f"<b>{row['pantry_name']}</b><br>"
+            f"{weight:,.1f} lbs delivered"
+        )
         folium.Marker(
-            location=[row['latitude'], row['longitude']],
-            icon=folium.Icon(color='darkblue', icon='shopping-cart', prefix='fa'),
-            tooltip=label
+            location=[row["latitude"], row["longitude"]],
+            icon=folium.Icon(color=icon_color, icon="shopping-cart", prefix="fa"),
+            tooltip=folium.Tooltip(tooltip, sticky=True),
         ).add_to(m)
+
     return m
 
-# Display the map on the website
-st_folium(generate_map(map_data), width=1200, height=600, returned_objects=[])
+
+st_folium(
+    generate_map(map_data),
+    width="100%",
+    height=600,
+    returned_objects=[],   # prevents unnecessary reruns on map interaction
+)

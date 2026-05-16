@@ -47,7 +47,7 @@ def get_live_data():
 
     # Make sure the 'weight' column is treated as a number instead of pulled as a link. In case of a typo, 
     # treat it as 0 so it remains compilable
-    shipment_df['weight'] = pd.to_numeric(shipment_df['weight'], errors='coerce').fillna(0)
+    pantry_weights = shipment_df.groupby('pantry_name', as_index=False)['weight'].sum()
     
     # If the database uses an ID number, this creates a dictionary to translate those numbers back into real pantry names
     pantry_map = dict(zip(pantry_df.index, pantry_df['pantry_name'])) 
@@ -60,33 +60,11 @@ def get_live_data():
     # Group every delivery and adds the weights together so we see 
     # the total impact in the table
     pantry_weights = shipment_df.groupby('pantry_name')['weight'].sum()
-
-   # Create an empty dictionary to store totals
-    # Keys will be pantry names, values will be the sum of weights
-    m = {}
-
-    # Loop through every row in the shipment dataframe
-    for index, row in shipment_df.iterrows():
-        name = row['pantry_name']
-        weight = row['weight']
-
-        # If name isn't in the dictionary, add it
-        # Else add the new weight to the existing total.
-        if name not in m:
-            m[name] = weight
-        else:
-            m[name] += weight
-
-    # 4. Convert the dictionary back into a Series so the rest of your code works
-    # This creates a format that matches what your 'pantry_weights' variable expects
-    pantry_weights = pd.Series(m, name='weight')
-    pantry_weights.index.name = 'pantry_name'
     
     # Combine the pantry coordinates with the calculated weights
     # 'left' skewed merge so that if a pantry has 0 deliveries, it still shows up.
     final_df = pd.merge(pantry_df, pantry_weights, on='pantry_name', how='left')
-    # Fill in blanks with 0
-    final_df['weight'] = final_df['weight'].fillna(0) 
+    final_df['weight'] = final_df['weight'].fillna(0)
 
     return final_df, shipment_df['weight'].sum(), pantry_weights
 

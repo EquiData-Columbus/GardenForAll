@@ -25,6 +25,7 @@ def get_live_data():
     # Convert that raw database data into organized tables (like Excel sheets for easier reading)
     pantry_df = pd.DataFrame(pantry_res.data)
     shipment_df = pd.DataFrame(shipment_res.data)
+    st.write(shipment_df['weight'].dtype)
 
     # Discard any pantries that don't have a location (or with null) so the map doesn't crash
     pantry_df = pantry_df.dropna(subset=['location'])

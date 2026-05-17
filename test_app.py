@@ -6,6 +6,19 @@ from supabase import create_client
 import pandas as pd
 from shapely import wkb
 
+# Fetch every row from a Supabase table, bypassing the 1000-row default limit.
+def fetch_all(supabase, table):
+    all_rows = []
+    chunk_size = 1000
+    start = 0
+    while True:
+        res = supabase.table(table).select("*").range(start, start + chunk_size - 1).execute()
+        all_rows.extend(res.data)
+        if len(res.data) < chunk_size:   # last page — we're done
+            break
+        start += chunk_size
+    return pd.DataFrame(all_rows)
+    
 # Set up the web page layout to be wide and give it a title
 st.set_page_config(page_title="Garden For All | Live Heatmap", layout="wide")
 
@@ -20,11 +33,11 @@ def get_live_data():
 
     # Tables: Pull the 'Pantry' list and the 'Food Shipments' list
     pantry_res = supabase.table("Pantry").select("*").execute()
-    shipment_res = supabase.table("Food Shipments").select("*").execute()
     
     # Convert that raw database data into organized tables (like Excel sheets for easier reading)
     pantry_df = pd.DataFrame(pantry_res.data)
-    shipment_df = pd.DataFrame(shipment_res.data)
+    
+    shipment_df = fetch_all(supabase, "Food Shipments")
 
     st.write(f"Shipment rows fetched: {len(shipment_df)}")
 

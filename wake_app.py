@@ -2,7 +2,7 @@ import os
 import time
 from playwright.sync_api import sync_playwright
 
-URL = "https://testapppy-mrzkqdn6kzmjfmsg7a2wv9.streamlit.app/"
+URL = "https://thegardenforall-heatmap.streamlit.app/"
 
 WAKE_PHRASES = [
     "Yes, get this app back up!",

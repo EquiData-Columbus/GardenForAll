@@ -1,49 +1,16 @@
 name: Wake Streamlit App
+
 on:
   schedule:
-    - cron: "0 */4 * * *" # Runs every 4 hours
-  workflow_dispatch: # Allows you to trigger it manually
+    - cron: '0 */6 * * *'
+  workflow_dispatch:          # Allows manual trigger from GitHub UI
 
 jobs:
-  wake:
+  ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install Dependencies
+      - name: Ping Streamlit app
         run: |
-          pip install selenium webdriver-manager
-
-      - name: Run Wake Script
-        run: |
-          python -c '
-          from selenium import webdriver
-          from selenium.webdriver.chrome.options import Options
-          from selenium.webdriver.common.by import By
-          import time
-
-          options = Options()
-          options.add_argument("--headless")
-          options.add_argument("--no-sandbox")
-          driver = webdriver.Chrome(options=options)
-          
-          print("Navigating to app...")
-          driver.get("https://testapppy-mrzkqdn6kzmjfmsg7a2wv9.streamlit.app/")
-          time.sleep(5)
-          
-          try:
-              # Attempt to find and click the wake button if it exists
-              button = driver.find_element(By.XPATH, "//button[contains(text(),\"Yes, get this app back up\")]")
-              button.click()
-              print("App was asleep. Clicked wake button! ✅")
-          except:
-              print("App is already awake! ✅")
-          
-          driver.quit()
-          '
+          curl --fail --silent --show-error --max-time 30 \
+            "https://your-app-name.streamlit.app"
+        continue-on-error: true  # Won't mark the workflow as failed if the app is slow to respond

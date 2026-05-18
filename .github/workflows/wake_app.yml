@@ -6,11 +6,22 @@ on:
   workflow_dispatch:          # Allows manual trigger from GitHub UI
 
 jobs:
-  ping:
+  wake:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Streamlit app
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright
         run: |
-          curl --fail --silent --show-error --max-time 30 \
-            "https://your-app-name.streamlit.app"
-        continue-on-error: true  # Won't mark the workflow as failed if the app is slow to respond
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Wake up Streamlit app
+        run: python wake_app.py
+        

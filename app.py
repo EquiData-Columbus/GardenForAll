@@ -88,7 +88,7 @@ st.sidebar.write("### Delivery Summary")
 st.sidebar.dataframe(summary_df[['pantry_name', 'weight']], hide_index=True)
 
 # Main Title
-st.title("Garden For All | Live Distribution Heatmap 🌎📌")
+# st.title("Garden For All | Live Distribution Heatmap 🌎📌")
 
 # The function that actually draws the map
 def generate_map(df):

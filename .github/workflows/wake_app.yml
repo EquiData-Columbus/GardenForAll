@@ -25,12 +25,3 @@ jobs:
       - name: Wake up Streamlit app
         run: python wake_app.py
 
-      # Uploads both screenshots so you can download and view them
-      # from the Actions run page even if the script crashes
-      - name: Upload debug screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-screenshots
-          path: screenshot_*.png
-          retention-days: 3

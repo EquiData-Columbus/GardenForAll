@@ -31,15 +31,8 @@ def get_live_data():
     key = st.secrets["SUPABASE_KEY"]
     supabase = create_client(url, key)
 
-    # Tables: Pull the 'Pantry' list and the 'Food Shipments' list
-    pantry_res = supabase.table("Pantry").select("*").execute()
-    
-    # Convert that raw database data into organized tables (like Excel sheets for easier reading)
-    pantry_df = pd.DataFrame(pantry_res.data)
-    
+    pantry_df = fetch_all(supabase, "Pantry")    
     shipment_df = fetch_all(supabase, "Food Shipments")
-
-    st.write(f"Shipment rows fetched: {len(shipment_df)}")
 
     # Discard any pantries that don't have a location (or with null) so the map doesn't crash
     pantry_df = pantry_df.dropna(subset=['location'])

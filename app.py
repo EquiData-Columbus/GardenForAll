@@ -98,7 +98,7 @@ def generate_map(df):
     # Heatmap Layer: This adds the heat circles based on how dense the deliveries are
     heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
     if heat_data:
-        HeatMap(heat_data, radius=35, blur=15, max_zoom=10).add_to(m)
+        HeatMap(heat_data, radius=35, blur=15, max_zoom=6).add_to(m)
 
     # Markers Layer: Put a blue shopping cart pin at every location
     for _, row in df.iterrows():

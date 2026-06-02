@@ -93,7 +93,7 @@ map_data, total_lbs, summary_df = get_live_data()
 # The function that actually draws the map
 def generate_map(df):
     # Start the map centered on Columbus, Ohio
-    m = folium.Map(location=[39.9612, -82.9988], zoom_start=9, tiles="cartodbpositron")
+    m = folium.Map(location=[39.9612, -82.9988], zoom_start=10, tiles="cartodbpositron")
     
     # Heatmap Layer: This adds the heat circles based on how dense the deliveries are
     heat_data = [[row['latitude'], row['longitude'], row['weight']] for _, row in df.iterrows() if row['weight'] > 0]
